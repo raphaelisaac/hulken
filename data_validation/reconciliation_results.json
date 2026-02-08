@@ -1,0 +1,311 @@
+{
+  "timestamp": "2026-02-08T15:14:19.637901",
+  "date_range": {
+    "start": "2026-01-09",
+    "end": "2026-02-08"
+  },
+  "overall": "FAIL",
+  "summary": {
+    "total": 49,
+    "passed": 40,
+    "warnings": 6,
+    "failed": 3,
+    "errors": 0
+  },
+  "checks": [
+    {
+      "name": "Freshness: Facebook Ads",
+      "status": "FAIL",
+      "message": "6 days behind (latest: 2026-02-02)",
+      "details": {}
+    },
+    {
+      "name": "Freshness: TikTok Ads",
+      "status": "WARNING",
+      "message": "3 days behind (latest: 2026-02-05)",
+      "details": {}
+    },
+    {
+      "name": "Freshness: Shopify Orders",
+      "status": "WARNING",
+      "message": "3 days behind (latest: 2026-02-05)",
+      "details": {}
+    },
+    {
+      "name": "Freshness: Shopify Customers",
+      "status": "WARNING",
+      "message": "3 days behind (latest: 2026-02-05)",
+      "details": {}
+    },
+    {
+      "name": "Freshness: Shopify UTM",
+      "status": "PASS",
+      "message": "Current (latest: 2026-02-08)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_live_orders",
+      "status": "PASS",
+      "message": "0 duplicates (9,865 rows)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_live_orders_clean",
+      "status": "PASS",
+      "message": "0 duplicates (9,865 rows)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_live_customers",
+      "status": "PASS",
+      "message": "0 duplicates (13,350 rows)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_live_customers_clean",
+      "status": "PASS",
+      "message": "0 duplicates (13,350 rows)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_orders",
+      "status": "PASS",
+      "message": "0 duplicates (585,927 rows)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: shopify_utm",
+      "status": "FAIL",
+      "message": "1,481 duplicates (0.2%)",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: facebook_ads_insights",
+      "status": "WARNING",
+      "message": "33,253 duplicates from Airbyte append mode (20.9%) - use dedup view for analysis",
+      "details": {}
+    },
+    {
+      "name": "Duplicates: tiktok_reports",
+      "status": "PASS",
+      "message": "0 duplicates (30,287 rows)",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders.email",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders.contact_email",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders.phone",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders.browser_ip",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders.customer_json",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_customers.email",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_customers.phone",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_customers.first_name",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_customers.last_name",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders_clean.customer_email_in_json",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_orders_clean.customer_name_in_json",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: shopify_live_customers_clean.first_name",
+      "status": "PASS",
+      "message": "0 exposed",
+      "details": {}
+    },
+    {
+      "name": "PII: OVERALL",
+      "status": "PASS",
+      "message": "Zero PII exposure across all tables",
+      "details": {}
+    },
+    {
+      "name": "Hash format: shopify_live_orders_clean",
+      "status": "PASS",
+      "message": "All 9,865 hashes are 64-char SHA256",
+      "details": {}
+    },
+    {
+      "name": "Hash format: shopify_live_customers_clean",
+      "status": "PASS",
+      "message": "All 13,350 hashes are 64-char SHA256",
+      "details": {}
+    },
+    {
+      "name": "Hash format: shopify_orders",
+      "status": "PASS",
+      "message": "All 585,754 hashes are 64-char SHA256",
+      "details": {}
+    },
+    {
+      "name": "Hash cross-table match",
+      "status": "PASS",
+      "message": "6,887/9,174 order hashes match customers (75%)",
+      "details": {}
+    },
+    {
+      "name": "Continuity: Shopify orders",
+      "status": "WARNING",
+      "message": "2 missing days: 2026-02-06, 2026-02-07",
+      "details": {}
+    },
+    {
+      "name": "Continuity: Facebook",
+      "status": "FAIL",
+      "message": "5 missing days",
+      "details": {}
+    },
+    {
+      "name": "Continuity: TikTok",
+      "status": "WARNING",
+      "message": "Missing: 2026-02-06, 2026-02-07",
+      "details": {}
+    },
+    {
+      "name": "NULLs: shopify_live_orders_clean.total_price",
+      "status": "PASS",
+      "message": "0/9,865 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: shopify_live_orders_clean.created_at",
+      "status": "PASS",
+      "message": "0/9,865 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: shopify_live_orders_clean.email_hash",
+      "status": "PASS",
+      "message": "0/9,865 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: shopify_live_customers_clean.email_hash",
+      "status": "PASS",
+      "message": "0/13,350 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: facebook_ads_insights.spend",
+      "status": "PASS",
+      "message": "0/159,342 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: facebook_ads_insights.date_start",
+      "status": "PASS",
+      "message": "0/159,342 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: facebook_ads_insights.ad_id",
+      "status": "PASS",
+      "message": "0/159,342 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: tiktok_ads_reports_daily.metrics",
+      "status": "PASS",
+      "message": "0/30,287 null",
+      "details": {}
+    },
+    {
+      "name": "NULLs: tiktok_ads_reports_daily.stat_time_day",
+      "status": "PASS",
+      "message": "0/30,287 null",
+      "details": {}
+    },
+    {
+      "name": "PII schedule: frequency",
+      "status": "PASS",
+      "message": "12 runs in last hour (~every 5 min)",
+      "details": {}
+    },
+    {
+      "name": "PII schedule: errors",
+      "status": "PASS",
+      "message": "0 errors in last hour",
+      "details": {}
+    },
+    {
+      "name": "PII schedule: recency",
+      "status": "PASS",
+      "message": "Last run 4 min ago",
+      "details": {}
+    },
+    {
+      "name": "Facebook daily spend",
+      "status": "PASS",
+      "message": "Latest: 2026-02-02 = $7,260.19 (296 ads)",
+      "details": {}
+    },
+    {
+      "name": "GA4 EU (analytics_334792038)",
+      "status": "PASS",
+      "message": "Daily: 20260206, Intraday: 20260208",
+      "details": {}
+    },
+    {
+      "name": "GA4 US (analytics_454869667)",
+      "status": "PASS",
+      "message": "Daily: 20260206, Intraday: 20260208",
+      "details": {}
+    },
+    {
+      "name": "GA4 CA (analytics_454871405)",
+      "status": "PASS",
+      "message": "Daily: 20260206, Intraday: 20260208",
+      "details": {}
+    }
+  ]
+}

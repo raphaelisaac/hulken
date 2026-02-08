@@ -1,0 +1,73 @@
+# ============================================
+# Better Signal - .gitignore
+# ============================================
+
+# --- Explicitly excluded ---
+archive/
+**/CLAUDE.md
+
+# --- Credentials & secrets ---
+credentials.json
+all_credentials.json
+hulken-fb56a345ac08.json
+tiktok_tokens.json
+.mcp.json
+airbyte.txt
+info_facebook.txt
+tiktok.txt
+**/.env
+**/.env.*
+!**/.env.example
+
+# --- Airbyte platform & exports ---
+airbyte-platform/
+airbyte_config_export.tar.gz
+airbyte_export.tar.gz
+airbyte_sources.json
+airbyte_destinations.json
+airbyte_connections.json
+
+# --- Customer PII data ---
+Shopify/hulken-orders-bulk-export.jsonl
+
+# --- Scripts with hardcoded secrets ---
+tiktok_oauth.py
+data_validation/extract_shopify_utm.py
+data_validation/extract_shopify_utm_incremental.py
+data_validation/extract_shopify_utm_vm_updated.py
+data_validation/real_reconciliation.py
+data_validation/extract_order_channels.py
+data_validation/restore_emails_from_backup.py
+data_validation/import_shopify.py
+vm_scripts/check_airbyte.py
+vm_scripts/extract_shopify_utm_incremental.py
+tasks/extract_shopify_utm_incremental.py
+
+# --- Large binaries ---
+toolbox.exe
+*.exe
+
+# --- Generated files ---
+*.pdf
+__azurite_db_table__.json
+AzuriteConfig
+data_validation/reconciliation_report.html
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# --- IDE & OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+.DS_Store
