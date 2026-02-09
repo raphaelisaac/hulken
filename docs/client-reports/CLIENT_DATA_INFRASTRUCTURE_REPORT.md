@@ -90,24 +90,23 @@ A complete marketing data infrastructure has been deployed connecting your adver
 | **Hulken Canada** | 1686648438857084 | Configured - Sync pending |
 | **Hulken Europe** | 1673934429844193 | **Active - Data available** |
 
-**Active Streams (14 total):**
+**Active Streams (13 total, prefix `facebook_`):**
 
-| Stream | Sync Mode | Description |
+| BigQuery Table | Sync Mode | Description |
 |--------|-----------|-------------|
-| `ads_insights` | Full Refresh | Daily performance metrics per ad |
-| `ads_insights_age_and_gender` | Full Refresh | Demographic breakdown |
-| `ads_insights_country` | Full Refresh | Geographic breakdown by country |
-| `ads_insights_region` | Full Refresh | Geographic breakdown by region |
-| `ads_insights_dma` | Full Refresh | DMA (Designated Market Area) breakdown |
-| `ads_insights_platform_and_device` | Full Refresh | Platform/device breakdown |
-| `ads_insights_action_type` | Full Refresh | Conversion actions breakdown |
-| `campaigns` | Full Refresh | Campaign metadata |
-| `ad_sets` | Full Refresh | Ad set metadata |
-| `ads` | Full Refresh | Ad metadata |
-| `ad_creatives` | Full Refresh | Creative assets metadata |
-| `custom_conversions` | Full Refresh | Custom conversion definitions |
-| `images` | Full Refresh | Image assets |
-| `activities` | Full Refresh | Account activity log |
+| `facebook_ads_insights` | Full Refresh | Daily performance metrics per ad |
+| `facebook_ads_insights_age_and_gender` | Full Refresh | Demographic breakdown |
+| `facebook_ads_insights_country` | Full Refresh | Geographic breakdown by country |
+| `facebook_ads_insights_region` | Full Refresh | Geographic breakdown by region |
+| `facebook_ads_insights_dma` | Full Refresh | DMA breakdown |
+| `facebook_ads_insights_platform_and_device` | Full Refresh | Platform/device breakdown |
+| `facebook_ads_insights_action_type` | Full Refresh | Conversion actions breakdown |
+| `facebook_campaigns` | Full Refresh | Campaign metadata |
+| `facebook_ad_sets` | Full Refresh | Ad set metadata |
+| `facebook_ads` | Full Refresh | Ad metadata |
+| `facebook_ad_creatives` | Full Refresh | Creative assets metadata |
+| `facebook_custom_conversions` | Full Refresh | Custom conversion definitions |
+| `facebook_images` | Full Refresh | Image assets |
 
 **Key Metrics Available:**
 - `spend`, `impressions`, `clicks`, `reach`, `frequency`
@@ -333,42 +332,46 @@ A custom Python script was developed that uses Shopify's GraphQL API to extract 
 
 | Table | Rows | Size | Description |
 |-------|------|------|-------------|
-| `ads_insights` | 33,253 | 121 MB | Daily ad performance metrics |
-| `ads_insights_action_type` | 33,254 | 102 MB | Conversion actions breakdown |
-| `ads_insights_age_and_gender` | 244,483 | 459 MB | Demographic breakdown |
-| `ads_insights_country` | 105,205 | 244 MB | Country breakdown |
-| `ads_insights_region` | 700,129 | 626 MB | Region breakdown |
-| `ads_insights_dma` | 26,241 | 50 MB | DMA breakdown |
-| `ads_insights_platform_and_device` | 464,839 | 564 MB | Platform/device breakdown |
+| `facebook_ads_insights` | 159,342 | 820 MB | Daily ad performance metrics |
+| `facebook_ads_insights_age_and_gender` | 1,494,810 | 3,615 MB | Demographic breakdown |
+| `facebook_ads_insights_country` | 332,442 | 1,112 MB | Country breakdown |
+| `facebook_ads_insights_region` | 911,412 | 862 MB | Region breakdown |
+| `facebook_ads` | 5,428 | 7 MB | Ad metadata |
+| `facebook_ad_sets` | 341 | 0.2 MB | Ad set metadata |
+| `facebook_ad_creatives` | 5,160 | 13 MB | Creative assets metadata |
 
-**Views Available:** `facebook_insights`, `facebook_campaigns`, `facebook_ad_sets`, etc. (these point to the base tables above)
+**Dedup Views (use these for analysis):** `facebook_insights`, `facebook_insights_age_gender`, `facebook_insights_country`, `facebook_insights_region` (ROW_NUMBER dedup to remove ~20% Airbyte duplicates)
 
 #### TikTok Marketing Tables (Dataset: ads_data)
 
+**Source tables (Airbyte, prefix `tiktok` without underscore):**
+
 | Table | Rows | Size | Description |
 |-------|------|------|-------------|
-| `tiktokads` | 949 | 0.7 MB | Ad metadata |
-| `tiktok_ads_reports_daily` | 34,339 | 30 MB | Daily ad metrics |
-| `tiktokads_audience_reports_daily` | 229,513 | 117 MB | Ad audience metrics |
-| `tiktokads_audience_reports_by_country_daily` | 33,242 | 17 MB | Ad metrics by country |
-| `tiktokads_audience_reports_by_platform_daily` | 88,867 | 46 MB | Ad metrics by platform |
-| `tiktokads_audience_reports_by_province_daily` | 1,045,987 | 549 MB | Ad metrics by province |
-| `tiktok_campaigns` | 35 | 0.01 MB | Campaign metadata |
-| `tiktok_campaigns_reports_daily` | 5,743 | 2 MB | Daily campaign metrics |
-| `tiktok_ad_groups` | 71 | 0.07 MB | Ad group metadata |
-| `tiktok_ad_groups_reports_daily` | 6,632 | 3 MB | Daily ad group metrics |
-| `tiktokadvertisers_reports_daily` | 1,327 | 0.4 MB | Daily account metrics |
+| `tiktokads` | 859 | 0.6 MB | Ad metadata |
+| `tiktokads_reports_daily` | 30,574 | 26 MB | Daily ad metrics (JSON) |
+| `tiktokcampaigns` | 35 | 0.01 MB | Campaign metadata |
+| `tiktokcampaigns_reports_daily` | 5,807 | 2 MB | Daily campaign metrics |
+| `tiktokad_groups` | 71 | 0.1 MB | Ad group metadata |
+| `tiktokad_groups_reports_daily` | 6,710 | 3 MB | Daily ad group metrics |
+| `tiktokadvertisers_reports_daily` | 1,335 | 0.4 MB | Daily account metrics |
+
+**Clean-name views (use these for analysis):** `tiktok_ads_reports_daily`, `tiktok_campaigns`, `tiktok_ads`, `tiktok_ad_groups`, `tiktok_ad_groups_reports_daily`, `tiktok_advertisers_reports_daily`, `tiktok_campaigns_reports_daily`
 
 #### Shopify Tables (Dataset: ads_data)
 
 | Table | Rows | Size | Description |
 |-------|------|------|-------------|
-| `shopify_orders` | 585,927 | 123 MB | Historical orders (bulk import) |
+| `shopify_orders` | 585,927 | 160 MB | Historical orders (bulk import) |
 | `shopify_line_items` | 719,124 | 79 MB | Order line items |
-| `shopify_utm` | 587,927 | 99 MB | UTM attribution data |
-| `shopify_live_orders` | 6,352 | 53 MB | Recent orders (Airbyte) |
-| `shopify_live_customers` | 6,655 | 4 MB | Customer data (Airbyte) |
-| `shopify_live_products` | 44 | 0.1 MB | Product catalog (Airbyte) |
+| `shopify_utm` | 592,742 | 128 MB | UTM attribution data |
+| `shopify_live_orders` | 13,637 | 103 MB | Recent orders (Airbyte, live sync) |
+| `shopify_live_orders_clean` | 13,636 | 52 MB | Orders with PII hashed |
+| `shopify_live_customers` | 18,790 | 5 MB | Customer data (Airbyte) |
+| `shopify_live_customers_clean` | 18,790 | 7 MB | Customers with PII hashed |
+| `shopify_live_products` | 1,060 | 2 MB | Product catalog (Airbyte) |
+| `shopify_live_transactions` | 39,995 | 117 MB | Payment transactions (Airbyte) |
+| `shopify_live_order_refunds` | 414 | 2 MB | Refund records (Airbyte) |
 
 #### Google Analytics 4 Tables (Separate Datasets)
 
@@ -380,15 +383,15 @@ A custom Python script was developed that uses Shopify's GraphQL API to extract 
 | `analytics_454869667` | `events_*` | Second property events |
 | `analytics_454871405` | `events_*` | Third property events |
 
-### 5.2 Data Totals
+### 5.2 Data Totals (Updated 2026-02-09)
 
-| Source | Tables | Total Rows | Total Size |
+| Source | Tables/Views | Total Rows | Total Size |
 |--------|--------|------------|------------|
-| Facebook | 20 | 1,607,404 | 2.2 GB |
-| TikTok | 28 | 1,666,974 | 839 MB |
-| Shopify | 9 | 1,918,645 | 415 MB |
+| Facebook | 7 tables + 4 views | 2,908,935 | 6.4 GB |
+| TikTok | 7 tables + 7 views | 45,391 | 33 MB |
+| Shopify | 10 tables | 1,990,115 | 655 MB |
 | Google Analytics 4 | ~30/property | ~3,000,000 | Varies |
-| **TOTAL** | **87+** | **8,000,000+** | **~4 GB** |
+| **TOTAL** | **~35 + GA4** | **~8,000,000+** | **~7 GB** |
 
 ---
 

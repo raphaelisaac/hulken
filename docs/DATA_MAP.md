@@ -14,14 +14,14 @@ SHOPIFY (API REST + GraphQL)
   └── Scheduled Query BQ (5 min) ──→ *_clean (PII hashe)
 
 FACEBOOK ADS (API Marketing)
-  └── Airbyte ──→ facebook_ads_insights, _region, _country, _age_and_gender
-  └── Airbyte ──→ facebook_ads, facebook_ad_creatives, facebook_ad_sets
-  └── Airbyte (ancien connecteur) ──→ ads_insights_*, ads, ad_creatives, ad_sets
+  └── Airbyte ──→ facebook_ads_insights, _region, _country, _age_and_gender, _dma, _action_type, _platform_and_device
+  └── Airbyte ──→ facebook_ads, facebook_ad_creatives, facebook_ad_sets, facebook_campaigns
+  └── Views dedup ──→ facebook_insights, _age_gender, _country, _region
 
 TIKTOK ADS (API Marketing)
-  └── Airbyte ──→ tiktokads_reports_daily, audience_reports_*
-  └── Airbyte ──→ tiktokad_groups_*, tiktokcampaigns_*, tiktokadvertisers_*
-  └── Airbyte ──→ tiktokads, tiktokad_groups, tiktokcampaigns
+  └── Airbyte ──→ tiktokads_reports_daily, tiktokads, tiktokcampaigns, tiktokad_groups
+  └── Airbyte ──→ tiktokad_groups_reports_daily, tiktokcampaigns_reports_daily, tiktokadvertisers_reports_daily
+  └── Views clean ──→ tiktok_ads_reports_daily, tiktok_campaigns, tiktok_ads, etc.
 
 GOOGLE ANALYTICS 4 (Integration native GA4 → BigQuery)
   └── GA4 EU (334792038) ──→ events_*, pseudonymous_users_*, users_*
@@ -33,7 +33,7 @@ GOOGLE ADS : PAS CONNECTE
 
 ---
 
-## Dataset 1 : `ads_data` (47 tables)
+## Dataset 1 : `ads_data` (~35 tables et vues)
 
 Le dataset principal. Toutes les donnees business arrivent ici.
 
@@ -93,23 +93,9 @@ Donnees provenant de l'**API Facebook Marketing**. 3 ad accounts (US, EU, CA).
 | `facebook_ad_creatives` | 5,160 | Contenu creatif des pubs : texte du post, image/video URL, lien destination, call-to-action |
 | `facebook_ad_sets` | 341 | Ad Sets : budget quotidien/lifetime, ciblage (age, interets, geo), placement (feed, stories, reels), scheduling |
 
-### Facebook Ads - Ancien connecteur (via Airbyte, legacy)
+### Facebook Ads - Ancien connecteur (SUPPRIME le 9 fev 2026)
 
-Memes donnees que ci-dessus mais extraites par un ancien connecteur Airbyte avec un format de colonnes different. **Gardees pour l'historique** - utiliser les tables `facebook_*` pour les analyses recentes.
-
-| Table | Lignes | Description |
-|-------|--------|-------------|
-| `ads_insights` | 33,433 | Equivalent ancien de `facebook_ads_insights` |
-| `ads_insights_age_and_gender` | 245,941 | Par age et genre |
-| `ads_insights_country` | 105,734 | Par pays |
-| `ads_insights_region` | 704,120 | Par region |
-| `ads_insights_dma` | 26,415 | Par DMA (Designated Market Area - zones marketing US type "New York Metro") |
-| `ads_insights_platform_and_device` | 467,829 | Par plateforme (Facebook, Instagram, Messenger, Audience Network) et device (mobile, desktop) |
-| `ads_insights_action_type` | 33,434 | Par type d'action (purchase, add_to_cart, view_content, initiate_checkout, lead, link_click...) |
-| `ads` | 1,172 | Ancien catalogue pubs |
-| `ad_creatives` | 3,483 | Ancien creatifs |
-| `ad_sets` | 62 | Ancien ad sets |
-| `images` | 342 | Images utilisees dans les pubs |
+> Les anciennes tables sans prefixe (`ads_insights`, `ads`, `ad_creatives`, `ad_sets`, `images`, etc.) ont ete supprimees le 9 fevrier 2026. Elles faisaient doublon avec les tables `facebook_*` et causaient de la confusion. Toutes les donnees sont maintenant dans les tables `facebook_*` ci-dessus.
 
 ### TikTok Ads (via Airbyte)
 
@@ -128,43 +114,35 @@ FROM `hulken.ads_data.tiktok_ads_reports_daily`
 
 | Table | Lignes | Description |
 |-------|--------|-------------|
-| `tiktokads_reports_daily` | 30,287 | **Metriques principales** par ad par jour : spend, impressions, clicks, conversions (dans JSON `metrics`) |
-| `tiktokads_audience_reports_daily` | 230,288 | Metriques par audience (age, genre) par jour |
-| `tiktokads_audience_reports_by_province_daily` | 1,052,020 | Metriques par province/region |
-| `tiktokads_audience_reports_by_country_daily` | 33,383 | Metriques par pays |
-| `tiktokads_audience_reports_by_platform_daily` | 89,294 | Metriques par plateforme (iOS, Android, desktop) |
-| `tiktokads_reports_by_country_daily` | 34,444 | Reports ad par pays |
-| `tiktokads` | 854 | Catalogue des pubs TikTok : nom, statut, creatif, date creation |
+| `tiktokads_reports_daily` | 30,574 | **Metriques principales** par ad par jour : spend, impressions, clicks, conversions (dans JSON `metrics`) |
+| `tiktokads` | 859 | Catalogue des pubs TikTok : nom, statut, creatif, date creation. **Contient `campaign_id` pour les jointures** |
 
 **Niveau Ad Group (groupe de ciblage) :**
 
 | Table | Lignes | Description |
 |-------|--------|-------------|
-| `tiktokad_groups_reports_daily` | 6,673 | Metriques par ad group par jour |
-| `tiktokad_groups_reports_by_country_daily` | 7,250 | Ad group par pays |
-| `tiktokad_group_audience_reports_daily` | 53,813 | Audience par ad group |
-| `tiktokad_group_audience_reports_by_platform_daily` | 19,751 | Audience ad group par plateforme |
-| `tiktokad_group_audience_reports_by_country_daily` | 6,863 | Audience ad group par pays |
+| `tiktokad_groups_reports_daily` | 6,710 | Metriques par ad group par jour |
 | `tiktokad_groups` | 71 | Catalogue ad groups : ciblage, budget, placement |
 
 **Niveau Campaign :**
 
 | Table | Lignes | Description |
 |-------|--------|-------------|
-| `tiktokcampaigns_reports_daily` | 5,777 | Metriques par campagne par jour |
-| `tiktokcampaigns_audience_reports_daily` | 50,725 | Audience par campagne |
-| `tiktokcampaigns_audience_reports_by_platform_daily` | 17,852 | Audience campagne par plateforme |
-| `tiktokcampaigns_audience_reports_by_country_daily` | 6,109 | Audience campagne par pays |
+| `tiktokcampaigns_reports_daily` | 5,807 | Metriques par campagne par jour |
 | `tiktokcampaigns` | 35 | Catalogue campagnes : nom, objectif (CONVERSIONS, TRAFFIC...), budget |
 
 **Niveau Advertiser (compte total) :**
 
 | Table | Lignes | Description |
 |-------|--------|-------------|
-| `tiktokadvertisers_reports_daily` | 1,331 | Metriques totales du compte par jour |
-| `tiktokadvertisers_audience_reports_daily` | 17,315 | Audience totale par jour |
-| `tiktokadvertisers_audience_reports_by_platform_daily` | 4,982 | Audience par plateforme |
-| `tiktokadvertisers_audience_reports_by_country_daily` | 1,785 | Audience par pays |
+| `tiktokadvertisers_reports_daily` | 1,335 | Metriques totales du compte par jour |
+
+> **Note** : Les tables audience TikTok (`*_audience_reports_*`, `*_by_country_daily`, `*_by_platform_daily`, `*_by_province_daily`) ont ete supprimees le 9 fev 2026 car non utilisees et volumineuses.
+
+**Jointure TikTok ROAS** : `campaign_id` est NULL dans `tiktokads_reports_daily`. Pour obtenir le nom de la campagne, il faut passer par `tiktokads` :
+```
+tiktokads_reports_daily (ad_id) → tiktokads (ad_id, campaign_id) → tiktokcampaigns (campaign_id, campaign_name)
+```
 
 ---
 
