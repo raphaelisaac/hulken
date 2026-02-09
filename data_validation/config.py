@@ -58,8 +58,8 @@ BQ_DATASET = "ads_data"
 TABLES = {
     "shopify_orders": f"{BQ_PROJECT}.{BQ_DATASET}.shopify_orders",
     "shopify_utm": f"{BQ_PROJECT}.{BQ_DATASET}.shopify_utm",
-    "facebook_ads": f"{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights",
-    "tiktok_ads": f"{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily",
+    "facebook_ads": f"{BQ_PROJECT}.{BQ_DATASET}.facebook_insights",
+    "tiktok_ads": f"{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily",
 }
 
 # ============================================================

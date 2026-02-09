@@ -29,7 +29,7 @@ SELECT
   CAST(JSON_VALUE(metrics, '$.comments') AS INT64) as comments,
   CAST(JSON_VALUE(metrics, '$.shares') AS INT64) as shares,
   CAST(JSON_VALUE(metrics, '$.engagements') AS INT64) as engagements
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ORDER BY date DESC, campaign_name, ad_name;
 
 
@@ -56,7 +56,7 @@ SELECT
   SUM(CAST(JSON_VALUE(metrics, '$.video_play_actions') AS INT64)) as total_video_plays,
   SUM(CAST(JSON_VALUE(metrics, '$.likes') AS INT64)) as total_likes,
   SUM(CAST(JSON_VALUE(metrics, '$.shares') AS INT64)) as total_shares
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY campaign_name
 ORDER BY total_spend_usd DESC;
 
@@ -76,7 +76,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS FLOAT64)), 0), 2) as cpc_usd,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa_usd
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY mois
 ORDER BY mois;
 
@@ -95,7 +95,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS FLOAT64)), 0) * 100, 2) as ctr_pct,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa_usd
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
 GROUP BY ad_name, campaign_name
 HAVING SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS INT64)) > 0

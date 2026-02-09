@@ -115,13 +115,13 @@ class ReconciliationCheck:
         sources = [
             {
                 'name': 'Facebook Ads',
-                'sql': f"SELECT MAX(date_start) FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights`",
+                'sql': f"SELECT MAX(date_start) FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_insights`",
                 'connector': 'Airbyte Facebook Marketing',
                 'daily_spend': AVG_DAILY_SPEND['facebook'],
             },
             {
                 'name': 'TikTok Ads',
-                'sql': f"SELECT MAX(DATE(stat_time_day)) FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`",
+                'sql': f"SELECT MAX(DATE(stat_time_day)) FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`",
                 'connector': 'Airbyte TikTok Marketing',
                 'daily_spend': AVG_DAILY_SPEND['tiktok'],
             },
@@ -239,30 +239,30 @@ class ReconciliationCheck:
             sql = f"""
             SELECT COUNT(*) AS total,
               COUNT(DISTINCT CONCAT(CAST(ad_id AS STRING), '|', CAST(date_start AS STRING), '|', CAST(account_id AS STRING))) AS distinct_keys
-            FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights`
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_insights`
             """
             row = self.query(sql)[0]
             dupes = row.total - row.distinct_keys
             if dupes == 0:
-                self.add("Duplicates: facebook_ads_insights", "PASS", "0 duplicates")
+                self.add("Duplicates: facebook_insights", "PASS", "0 duplicates")
             else:
                 pct = dupes / row.total * 100
-                self.add("Duplicates: facebook_ads_insights", "WARNING",
+                self.add("Duplicates: facebook_insights", "WARNING",
                          f"{dupes:,} duplicates ({pct:.1f}%) - dedup view available",
                          diagnosis={
                              'cause': "Airbyte Facebook connector uses append mode. Each sync re-ingests recent days, creating overlapping records.",
-                             'impact': f"{dupes:,} duplicate rows inflate spend totals by ~{pct:.0f}% if querying raw table. The dedup view 'facebook_ads_insights_dedup' filters these out.",
-                             'action': "ALWAYS use `facebook_ads_insights_dedup` view for analysis. The view keeps only the latest version of each (ad_id, date_start, account_id) combination."
+                             'impact': f"{dupes:,} duplicate rows inflate spend totals by ~{pct:.0f}% if querying raw table. The dedup view 'facebook_insights' filters these out.",
+                             'action': "ALWAYS use `facebook_insights` view for analysis. The view keeps only the latest version of each (ad_id, date_start, account_id) combination."
                          })
         except Exception as e:
-            self.add("Duplicates: facebook_ads_insights", "ERROR", str(e))
+            self.add("Duplicates: facebook_insights", "ERROR", str(e))
 
         # TikTok
         try:
             sql = f"""
             SELECT COUNT(*) AS total,
               COUNT(DISTINCT CONCAT(CAST(ad_id AS STRING), '|', CAST(stat_time_day AS STRING))) AS distinct_keys
-            FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
             """
             row = self.query(sql)[0]
             dupes = row.total - row.distinct_keys
@@ -450,7 +450,7 @@ class ReconciliationCheck:
                     ),
                     data_dates AS (
                       SELECT date_start AS d, COUNT(*) AS cnt
-                      FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights`
+                      FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_insights`
                       WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
                       GROUP BY d
                     )
@@ -471,7 +471,7 @@ class ReconciliationCheck:
                     ),
                     data_dates AS (
                       SELECT DATE(stat_time_day) AS d, COUNT(*) AS cnt
-                      FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`
+                      FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
                       WHERE DATE(stat_time_day) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
                       GROUP BY d
                     )
@@ -530,11 +530,11 @@ class ReconciliationCheck:
             ("shopify_live_orders_clean", "created_at", "Time-series analysis"),
             ("shopify_live_orders_clean", "email_hash", "Customer matching"),
             ("shopify_live_customers_clean", "email_hash", "Customer identification"),
-            ("facebook_ads_insights", "spend", "Ad spend tracking"),
-            ("facebook_ads_insights", "date_start", "Date partitioning"),
-            ("facebook_ads_insights", "ad_id", "Ad-level attribution"),
-            ("tiktokads_reports_daily", "metrics", "Performance metrics"),
-            ("tiktokads_reports_daily", "stat_time_day", "Date partitioning"),
+            ("facebook_insights", "spend", "Ad spend tracking"),
+            ("facebook_insights", "date_start", "Date partitioning"),
+            ("facebook_insights", "ad_id", "Ad-level attribution"),
+            ("tiktok_ads_reports_daily", "metrics", "Performance metrics"),
+            ("tiktok_ads_reports_daily", "stat_time_day", "Date partitioning"),
         ]
 
         for table, field, purpose in field_checks:
@@ -635,7 +635,7 @@ class ReconciliationCheck:
               SELECT date_start, account_id, ad_id,
                 CAST(spend AS FLOAT64) AS spend,
                 ROW_NUMBER() OVER (PARTITION BY ad_id, date_start, account_id ORDER BY _airbyte_extracted_at DESC) AS rn
-              FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights`
+              FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_insights`
               WHERE date_start BETWEEN '{self.start_date}' AND '{self.end_date}'
             )
             SELECT date_start,
@@ -709,7 +709,7 @@ class ReconciliationCheck:
             FROM `{BQ_PROJECT}.{BQ_DATASET}.__TABLES__`
             WHERE table_id IN (
               'shopify_live_orders', 'shopify_live_customers', 'shopify_utm',
-              'facebook_ads_insights', 'tiktokads_reports_daily',
+              'facebook_insights', 'tiktok_ads_reports_daily',
               'shopify_live_orders_clean', 'shopify_live_customers_clean'
             )
             ORDER BY hours_behind DESC

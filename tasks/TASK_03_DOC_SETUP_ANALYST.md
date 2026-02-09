@@ -36,8 +36,8 @@ doc_setup/
 ### Ads Tables
 | Table | Description | Rows | Key Columns |
 |-------|-------------|------|-------------|
-| facebook_ads_insights | Facebook ad metrics | 957K | campaign_id, spend, impressions |
-| tiktokads_reports_daily | TikTok ad metrics | 38K | campaign_id, metrics (JSON) |
+| facebook_insights | Facebook ad metrics | 957K | campaign_id, spend, impressions |
+| tiktok_ads_reports_daily | TikTok ad metrics | 38K | campaign_id, metrics (JSON) |
 
 ### GA4 Tables
 | Dataset | Description |
@@ -60,7 +60,7 @@ GROUP BY 1 ORDER BY 2 DESC
 
 ## Facebook Campaign Performance
 SELECT campaign_name, SUM(spend), SUM(impressions)
-FROM facebook_ads_insights
+FROM facebook_insights
 GROUP BY 1 ORDER BY 2 DESC
 
 ## Customer Lifetime Value
@@ -103,7 +103,7 @@ All deliverables completed:
 
 Key findings from BigQuery:
 - 63 total tables in hulken.ads_data
-- Largest tables: facebook_ads_insights_age_and_gender (1.5M rows), tiktokads_audience_reports_by_province_daily (1M rows)
+- Largest tables: facebook_insights_age_gender (1.5M rows), tiktokads_audience_reports_by_province_daily (1M rows)
 - Shopify data: 585K orders (bulk), 21K orders (live), 589K UTM records
 - Facebook data: 159K ads_insights rows
 - TikTok data: 28K ads_reports_daily rows

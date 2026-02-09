@@ -65,7 +65,7 @@ SELECT
   SUM(clicks) as clicks,
   SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100 as ctr,
   SAFE_DIVIDE(SUM(spend), SUM(clicks)) as cpc
-FROM `hulken.ads_data.facebook_ads_insights`
+FROM `hulken.ads_data.facebook_insights`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY 1
 ORDER BY spend DESC
@@ -78,7 +78,7 @@ WITH fb_spend AS (
   SELECT
     campaign_name,
     SUM(spend) as spend
-  FROM `hulken.ads_data.facebook_ads_insights`
+  FROM `hulken.ads_data.facebook_insights`
   WHERE date_start >= '2026-01-01'
   GROUP BY 1
 ),
@@ -112,7 +112,7 @@ SELECT
   SUM(spend) as spend,
   SUM(impressions) as impressions,
   SUM(clicks) as clicks
-FROM `hulken.ads_data.facebook_ads_insights_country`
+FROM `hulken.ads_data.facebook_insights_country`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY 1
 ORDER BY spend DESC
@@ -132,7 +132,7 @@ SELECT
   SUM(clicks) as clicks,
   SUM(conversion) as conversions,
   SAFE_DIVIDE(SUM(conversion), SUM(clicks)) * 100 as cvr
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY 1
 ORDER BY spend DESC
@@ -146,7 +146,7 @@ WITH tiktok_spend AS (
     campaign_name,
     SUM(spend) as spend,
     SUM(conversion) as conversions
-  FROM `hulken.ads_data.tiktokads_reports_daily`
+  FROM `hulken.ads_data.tiktok_ads_reports_daily`
   WHERE stat_time_day >= '2026-01-01'
   GROUP BY 1
 ),
@@ -288,13 +288,13 @@ SELECT
   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(_airbyte_extracted_at), HOUR) as hours_ago
 FROM `hulken.ads_data.shopify_live_orders`
 UNION ALL
-SELECT 'facebook_ads_insights', MAX(_airbyte_extracted_at),
+SELECT 'facebook_insights', MAX(_airbyte_extracted_at),
   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(_airbyte_extracted_at), HOUR)
-FROM `hulken.ads_data.facebook_ads_insights`
+FROM `hulken.ads_data.facebook_insights`
 UNION ALL
-SELECT 'tiktokads_reports_daily', MAX(_airbyte_extracted_at),
+SELECT 'tiktok_ads_reports_daily', MAX(_airbyte_extracted_at),
   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(_airbyte_extracted_at), HOUR)
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 UNION ALL
 SELECT 'shopify_utm', MAX(extracted_at),
   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(extracted_at), HOUR)
@@ -350,8 +350,8 @@ ORDER BY orders DESC
 SELECT 'shopify_orders' as tbl, COUNT(*) as rows FROM `hulken.ads_data.shopify_orders`
 UNION ALL SELECT 'shopify_utm', COUNT(*) FROM `hulken.ads_data.shopify_utm`
 UNION ALL SELECT 'shopify_live_orders', COUNT(*) FROM `hulken.ads_data.shopify_live_orders`
-UNION ALL SELECT 'facebook_ads_insights', COUNT(*) FROM `hulken.ads_data.facebook_ads_insights`
-UNION ALL SELECT 'tiktokads_reports_daily', COUNT(*) FROM `hulken.ads_data.tiktokads_reports_daily`
+UNION ALL SELECT 'facebook_insights', COUNT(*) FROM `hulken.ads_data.facebook_insights`
+UNION ALL SELECT 'tiktok_ads_reports_daily', COUNT(*) FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ORDER BY rows DESC
 ```
 
@@ -366,14 +366,14 @@ SELECT
   'Facebook' as platform,
   SUM(spend) as spend,
   'EUR' as currency
-FROM `hulken.ads_data.facebook_ads_insights`
+FROM `hulken.ads_data.facebook_insights`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 UNION ALL
 SELECT
   'TikTok',
   SUM(spend),
   'USD'
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 ```
 

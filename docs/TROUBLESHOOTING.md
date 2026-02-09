@@ -452,9 +452,9 @@ SELECT 'shopify_utm' as source, MAX(created_at) as latest FROM `hulken.ads_data.
 UNION ALL
 SELECT 'shopify_live_orders', MAX(created_at) FROM `hulken.ads_data.shopify_live_orders`
 UNION ALL
-SELECT 'facebook_ads_insights', MAX(date_start) FROM `hulken.ads_data.facebook_ads_insights`
+SELECT 'facebook_insights', MAX(date_start) FROM `hulken.ads_data.facebook_insights`
 UNION ALL
-SELECT 'tiktokads_reports_daily', MAX(stat_time_day) FROM `hulken.ads_data.tiktokads_reports_daily`
+SELECT 'tiktok_ads_reports_daily', MAX(stat_time_day) FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ```
 
 ---

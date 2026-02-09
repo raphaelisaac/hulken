@@ -53,8 +53,8 @@ SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK', '')
 
 # Thresholds (hours)
 THRESHOLDS = {
-    'facebook_ads_insights': {'warn': 30, 'critical': 48, 'label': 'Facebook Ads', 'daily_value': 20000},
-    'tiktokads_reports_daily': {'warn': 30, 'critical': 48, 'label': 'TikTok Ads', 'daily_value': 2000},
+    'facebook_insights': {'warn': 30, 'critical': 48, 'label': 'Facebook Ads', 'daily_value': 20000},
+    'tiktok_ads_reports_daily': {'warn': 30, 'critical': 48, 'label': 'TikTok Ads', 'daily_value': 2000},
     'shopify_live_orders': {'warn': 30, 'critical': 48, 'label': 'Shopify Orders', 'daily_value': 90000},
     'shopify_live_customers': {'warn': 30, 'critical': 48, 'label': 'Shopify Customers', 'daily_value': 0},
     'shopify_live_orders_clean': {'warn': 30, 'critical': 48, 'label': 'Orders Clean (PII)', 'daily_value': 0},

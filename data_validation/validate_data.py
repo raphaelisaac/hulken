@@ -78,7 +78,7 @@ def get_bigquery_facebook_stats_by_account(client, account_id, start_date, end_d
         COALESCE(SUM(impressions), 0) as total_impressions,
         COALESCE(SUM(clicks), 0) as total_clicks,
         COUNT(*) as row_count
-    FROM `{BQ_PROJECT}.{BQ_DATASET}.ads_insights`
+    FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_insights`
     WHERE date_start BETWEEN '{start_date}' AND '{end_date}'
     AND account_id = '{account_id}'
     """
@@ -103,7 +103,7 @@ def get_bigquery_tiktok_stats(client, start_date, end_date):
         COALESCE(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS INT64)), 0) as total_impressions,
         COALESCE(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS INT64)), 0) as total_clicks,
         COUNT(*) as row_count
-    FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`
+    FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
     WHERE CAST(stat_time_day AS DATE) BETWEEN '{start_date}' AND '{end_date}'
     """
     try:

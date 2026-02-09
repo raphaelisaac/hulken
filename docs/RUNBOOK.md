@@ -95,12 +95,12 @@ gcloud compute ssh instance-20260129-133637 \
 - `shopify_live_products`, `shopify_live_transactions`, etc.
 
 **Facebook:**
-- `facebook_ads_insights` (159,342 rows) - Métriques quotidiennes
+- `facebook_insights` (159,342 rows) - Métriques quotidiennes
 - `facebook_campaigns`, `facebook_ad_sets`, `facebook_ads`
 
 **TikTok:**
-- `tiktokads_reports_daily` (28,723 rows) - Métriques quotidiennes
-- `tiktokcampaigns`, `tiktokads`, etc.
+- `tiktok_ads_reports_daily` (28,723 rows) - Métriques quotidiennes
+- `tiktok_campaigns`, `tiktokads`, etc.
 
 ### 2.4 Troubleshooting Airbyte
 
@@ -142,8 +142,8 @@ print(list(client.query(query).result())[0][0])
 | shopify_utm | 589,602 | Attribution UTM |
 | shopify_live_orders_clean | 8,447 | Commandes récentes (hashé) |
 | shopify_live_customers_clean | 10,680 | Clients (hashé) |
-| facebook_ads_insights | 159,342 | Métriques Facebook |
-| tiktokads_reports_daily | 28,723 | Métriques TikTok |
+| facebook_insights | 159,342 | Métriques Facebook |
+| tiktok_ads_reports_daily | 28,723 | Métriques TikTok |
 
 ### 3.4 Export Données
 
@@ -217,7 +217,7 @@ SELECT
   SUM(spend) as spend,
   SUM(conversion) as conversions,
   SUM(total_complete_payment_rate) as purchases
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY 1, 2
 ```
 
@@ -228,7 +228,7 @@ SELECT
   campaign_name,
   SUM(spend) as spend,
   SUM(CAST(JSON_VALUE(actions, '$[0].value') AS FLOAT64)) as conversions
-FROM `hulken.ads_data.facebook_ads_insights`
+FROM `hulken.ads_data.facebook_insights`
 GROUP BY 1, 2
 ```
 

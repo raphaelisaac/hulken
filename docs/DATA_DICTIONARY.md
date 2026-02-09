@@ -161,7 +161,7 @@
 
 **No Airbyte columns. email_hash pre-computed during extraction.**
 
-### `facebook_ads_insights` (USE `_dedup` VIEW) - Ad Performance
+### `facebook_ads_insights` (USE `facebook_insights` VIEW) - Ad Performance
 
 | Column | Type | Key For |
 |--------|------|---------|
@@ -209,8 +209,8 @@ Extra columns in demographic tables:
 | Column | Type | Description |
 |--------|------|-------------|
 | `ad_id` | INT64 | Ad identifier (joins to tiktokads.ad_id) |
-| `adgroup_id` | INT64 | Ad group (joins to tiktokad_groups) |
-| `campaign_id` | INT64 | Campaign (joins to tiktokcampaigns.campaign_id) |
+| `adgroup_id` | INT64 | Ad group (joins to tiktok_ad_groups) |
+| `campaign_id` | INT64 | Campaign (joins to tiktok_campaigns.campaign_id) |
 | `advertiser_id` | INT64 | Advertiser account |
 | `stat_time_day` | DATETIME | Reporting date (**DATETIME not DATE, use DATE() to compare**) |
 | `stat_time_hour` | DATETIME | Hourly timestamp (usually null for daily) |
@@ -227,7 +227,7 @@ CAST(JSON_EXTRACT_SCALAR(metrics, '$.complete_payment') AS INT64) AS purchases
 CAST(JSON_EXTRACT_SCALAR(metrics, '$.total_complete_payment_rate') AS FLOAT64) AS conv_rate
 ```
 
-### `tiktokcampaigns` - Campaign Metadata
+### `tiktok_campaigns` (view of `tiktokcampaigns`) - Campaign Metadata
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -285,10 +285,10 @@ CAST(JSON_EXTRACT_SCALAR(metrics, '$.total_complete_payment_rate') AS FLOAT64) A
 ## 3. Join Keys & Relationships
 
 ```
-shopify_utm.first_utm_campaign ──────► facebook_ads_insights_dedup.campaign_name
+shopify_utm.first_utm_campaign ──────► facebook_insights.campaign_name
                                        (22/38 campaigns match, 58%)
 
-shopify_utm.first_utm_campaign ──────► tiktokcampaigns.campaign_name
+shopify_utm.first_utm_campaign ──────► tiktok_campaigns.campaign_name
                                        (34/34 campaigns match, 100%)
 
 shopify_utm.order_name ─────────────► shopify_orders.name
@@ -304,11 +304,11 @@ facebook_ads_insights.ad_id ────────► facebook_ad_creatives.id
 
 facebook_ads_insights.campaign_id ──► campaigns.id (or via campaign_name)
 
-tiktokads_reports_daily.campaign_id ► tiktokcampaigns.campaign_id
+tiktokads_reports_daily.campaign_id ► tiktok_campaigns.campaign_id
 
 tiktokads_reports_daily.ad_id ──────► tiktokads.ad_id
 
-tiktokads_reports_daily.adgroup_id ─► tiktokad_groups.adgroup_id
+tiktokads_reports_daily.adgroup_id ─► tiktok_ad_groups.adgroup_id
 ```
 
 ### Cross-Platform Customer Matching
@@ -332,14 +332,14 @@ Facebook data arrives in **append mode** causing ~20.9% duplicates. Always use t
 
 | View | Base Table | Dedup Key | Clean Rows |
 |------|-----------|-----------|------------|
-| `facebook_ads_insights_dedup` | facebook_ads_insights | ad_id, date_start, account_id | 126,089 |
-| `facebook_ads_insights_age_and_gender_dedup` | facebook_ads_insights_age_and_gender | ad_id, date_start, account_id, age, gender | ~1.2M |
-| `facebook_ads_insights_country_dedup` | facebook_ads_insights_country | ad_id, date_start, account_id, country | ~263K |
-| `facebook_ads_insights_region_dedup` | facebook_ads_insights_region | ad_id, date_start, account_id, region | ~720K |
+| `facebook_insights` | facebook_ads_insights | ad_id, date_start, account_id | 126,089 |
+| `facebook_insights_age_gender` | facebook_ads_insights_age_and_gender | ad_id, date_start, account_id, age, gender | ~1.2M |
+| `facebook_insights_country` | facebook_ads_insights_country | ad_id, date_start, account_id, country | ~263K |
+| `facebook_insights_region` | facebook_ads_insights_region | ad_id, date_start, account_id, region | ~720K |
 
 **Dedup SQL pattern used:**
 ```sql
-CREATE OR REPLACE VIEW `hulken.ads_data.facebook_ads_insights_dedup` AS
+CREATE OR REPLACE VIEW `hulken.ads_data.facebook_insights` AS
 SELECT * EXCEPT(rn) FROM (
   SELECT *, ROW_NUMBER() OVER (
     PARTITION BY ad_id, date_start, account_id
@@ -349,7 +349,7 @@ SELECT * EXCEPT(rn) FROM (
 ) WHERE rn = 1
 ```
 
-**RULE: Never query raw `facebook_ads_insights` tables directly. Always use `_dedup` views.**
+**RULE: Never query raw `facebook_ads_insights` tables directly. Always use the clean views (`facebook_insights`, etc.).**
 
 ---
 
@@ -368,7 +368,7 @@ SELECT
 FROM `hulken.ads_data.shopify_utm` u
 LEFT JOIN (
   SELECT campaign_name, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend
-  FROM `hulken.ads_data.facebook_ads_insights_dedup`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ) f ON u.first_utm_campaign = f.campaign_name
 WHERE u.first_utm_source LIKE '%facebook%'
@@ -390,8 +390,8 @@ FROM `hulken.ads_data.shopify_utm` u
 LEFT JOIN (
   SELECT c.campaign_name,
     ROUND(SUM(CAST(JSON_EXTRACT_SCALAR(r.metrics, '$.spend') AS FLOAT64)), 2) AS spend
-  FROM `hulken.ads_data.tiktokads_reports_daily` r
-  JOIN `hulken.ads_data.tiktokcampaigns` c ON r.campaign_id = c.campaign_id
+  FROM `hulken.ads_data.tiktok_ads_reports_daily` r
+  JOIN `hulken.ads_data.tiktok_campaigns` c ON r.campaign_id = c.campaign_id
   GROUP BY 1
 ) t ON u.first_utm_campaign = t.campaign_name
 WHERE u.first_utm_source = 'tiktok'
@@ -471,13 +471,13 @@ ORDER BY revenue DESC
 WITH daily_spend AS (
   SELECT date_start AS dt,
     ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS fb_spend
-  FROM `hulken.ads_data.facebook_ads_insights_dedup`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ),
 daily_tiktok AS (
   SELECT DATE(stat_time_day) AS dt,
     ROUND(SUM(CAST(JSON_EXTRACT_SCALAR(metrics, '$.spend') AS FLOAT64)), 2) AS tt_spend
-  FROM `hulken.ads_data.tiktokads_reports_daily`
+  FROM `hulken.ads_data.tiktok_ads_reports_daily`
   GROUP BY 1
 ),
 daily_revenue AS (
@@ -513,7 +513,7 @@ SELECT
   SUM(clicks) AS clicks,
   ROUND(SUM(CAST(spend AS FLOAT64)) / NULLIF(SUM(clicks), 0), 2) AS cost_per_click,
   ROUND(SUM(CAST(ctr AS FLOAT64) * impressions) / NULLIF(SUM(impressions), 0), 4) AS weighted_ctr
-FROM `hulken.ads_data.facebook_ads_insights_age_and_gender_dedup`
+FROM `hulken.ads_data.facebook_insights_age_gender`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY 1, 2
 HAVING spend > 100
@@ -608,7 +608,7 @@ The TikTok Airbyte connector creates separate tables for every combination of:
 
 Most analysis only needs:
 - `tiktokads_reports_daily` (ad-level spend/performance)
-- `tiktokcampaigns` (campaign names)
+- `tiktok_campaigns` (campaign names)
 - `tiktokads_audience_reports_by_province_daily` (geo analysis, if needed)
 
 **Candidates to drop or ignore (all can be derived from ad-level data):**
@@ -663,11 +663,11 @@ CAST(JSON_EXTRACT_SCALAR(metrics, '$.spend') AS FLOAT64)
 spend  -- as a proper FLOAT64 column
 ```
 
-**Recommended action:** Create a `tiktokads_reports_clean` view that extracts the top 10 metrics into proper columns.
+**Recommended action:** Create a `tiktok_ads_reports_daily` view that extracts the top 10 metrics into proper columns.
 
-**Proposed view:**
+**Proposed view (now implemented):**
 ```sql
-CREATE OR REPLACE VIEW `hulken.ads_data.tiktokads_reports_clean` AS
+CREATE OR REPLACE VIEW `hulken.ads_data.tiktok_ads_reports_daily` AS
 SELECT
   ad_id,
   adgroup_id,
@@ -684,7 +684,7 @@ SELECT
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.cpm') AS FLOAT64) AS cpm,
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.ctr') AS FLOAT64) AS ctr,
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.reach') AS INT64) AS reach
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ```
 
 ---
@@ -711,10 +711,10 @@ These caused errors during analysis. Keep this list for reference.
 
 ### Table Name Gotchas
 
-| Wrong | Correct | Notes |
+| Raw Airbyte Name | Clean View Name | Notes |
 |-------|---------|-------|
-| `tiktok_ads_reports_daily` | `tiktokads_reports_daily` | No underscore between tiktok and ads |
-| `tiktok_campaigns` | `tiktokcampaigns` | All one word |
+| `tiktokads_reports_daily` | `tiktok_ads_reports_daily` | View extracts JSON metrics into columns |
+| `tiktokcampaigns` | `tiktok_campaigns` | View with clean naming |
 | `shopify_customers` | `shopify_live_customers` | Need `live_` prefix |
 | `facebook_campaigns` | `campaigns` | Uses legacy `ads_` prefix naming |
 

@@ -60,7 +60,7 @@ pip3 install google-cloud-bigquery pandas db-dtypes streamlit python-dotenv
 ```bash
 python -c "from google.cloud import bigquery; c=bigquery.Client(project='hulken'); print('OK -', len(list(c.list_tables('ads_data'))), 'tables')"
 ```
-Tu dois voir : `OK - 49 tables` (ou plus si des vues ont ete ajoutees)
+Tu dois voir : `OK - 35 tables` (environ)
 
 ---
 
@@ -134,29 +134,29 @@ SELECT
   ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS depense_facebook,
   SUM(impressions) AS impressions,
   SUM(clicks) AS clics
-FROM `hulken.ads_data.facebook_ads_insights_dedup`
+FROM `hulken.ads_data.facebook_insights`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY 1
 ORDER BY 1 DESC
 ```
 
-> **IMPORTANT** : Utilise toujours `facebook_ads_insights_dedup` (avec _dedup). Jamais `facebook_ads_insights` directement (il y a 20% de doublons).
+> Utilise toujours `facebook_insights` (pas `facebook_ads_insights` qui est la table brute Airbyte).
 
 ### 3.3 Depenses TikTok par jour
 
 ```sql
 SELECT
-  DATE(stat_time_day) AS date,
+  report_date AS date,
   ROUND(SUM(spend), 2) AS depense_tiktok,
   SUM(impressions) AS impressions,
   SUM(clicks) AS clics
-FROM `hulken.ads_data.tiktokads_reports_clean`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY 1
 ORDER BY 1 DESC
 LIMIT 30
 ```
 
-> On utilise `tiktokads_reports_clean` (vue simplifiee) au lieu de `tiktokads_reports_daily` (ou les metrics sont en JSON).
+> `tiktok_ads_reports_daily` est une vue qui extrait les metriques du JSON brut. La colonne `report_date` est deja formatee en DATE.
 
 ### 3.4 Revenue par source d'acquisition (UTM)
 
@@ -243,7 +243,7 @@ SELECT
   campaign_name,
   ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS depense,
   SUM(impressions) AS impressions
-FROM `hulken.ads_data.facebook_ads_insights_dedup`
+FROM `hulken.ads_data.facebook_insights`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
 GROUP BY 1
 ORDER BY depense DESC
@@ -277,25 +277,35 @@ LIMIT 5
 | `shopify_live_customers_clean` | Clients (Airbyte) | id, email_hash, total_spent, orders_count |
 | `shopify_utm` | Attribution UTM par commande | order_id, total_price, first_utm_source, first_utm_campaign |
 | `shopify_orders` | Historique complet (585K commandes) | id, name, totalPrice, createdAt, email_hash |
-| `facebook_ads_insights_dedup` | Perf Facebook (sans doublons) | campaign_name, date_start, spend, impressions, clicks |
-| `tiktokads_reports_clean` | Perf TikTok (metriques extraites) | campaign_id, report_date, spend, impressions, clicks |
-| `tiktokcampaigns` | Noms des campagnes TikTok | campaign_id, campaign_name |
+| `facebook_insights` | Performance Facebook | campaign_name, date_start, spend, impressions, clicks |
+| `tiktok_ads_reports_daily` | Performance TikTok | campaign_id, report_date, spend, impressions, clicks |
+| `tiktok_campaigns` | Noms des campagnes TikTok | campaign_id, campaign_name |
+
+### Convention de nommage
+
+Toutes les tables suivent le format : `plateforme_entite`. Exemples :
+- `facebook_insights` - performance pub Facebook
+- `tiktok_ads_reports_daily` - performance pub TikTok
+- `tiktok_campaigns` - catalogue campagnes TikTok
+- `shopify_live_orders_clean` - commandes avec PII protege
+
+> Les vues sont des alias (0 octets de stockage supplementaire) qui pointent vers les tables source Airbyte.
 
 ### Ce que tu n'utilises PAS directement :
 
-| Table | Pourquoi |
-|-------|---------|
-| `facebook_ads_insights` (sans _dedup) | 20% de doublons, utilise la vue _dedup |
-| `tiktokads_reports_daily` | Metriques en JSON, utilise _clean |
-| `shopify_live_orders` (sans _clean) | PII nullifie, pas de hash |
-| `ads_insights`, `ads_insights_*` | Anciennes tables en double, ignorer |
-| Toutes les tables `tiktokad_group_*`, `tiktokcampaigns_*`, `tiktokadvertisers_*` | Aggregations redondantes |
+| Table brute Airbyte | Pourquoi | Utilise plutot |
+|-------|---------|---------|
+| `facebook_ads_insights` | Contient des doublons (~20%) | `facebook_insights` (dedupliquee) |
+| `tiktokads_reports_daily` | Metriques en JSON brut | `tiktok_ads_reports_daily` (colonnes propres) |
+| `shopify_live_orders` | PII non protege | `shopify_live_orders_clean` |
+| `tiktokads`, `tiktokad_groups`, `tiktokcampaigns` | Noms Airbyte sans underscore | `tiktok_ads`, `tiktok_ad_groups`, `tiktok_campaigns` |
 
 ### Regles d'or :
-1. **Facebook** : toujours `_dedup`
-2. **TikTok** : toujours `_clean` ou extraire le JSON avec `JSON_EXTRACT_SCALAR`
-3. **Shopify PII** : toujours `_clean` (jamais les tables sans _clean)
-4. **Dates TikTok** : `DATE(stat_time_day)` car c'est un DATETIME pas un DATE
+1. **Facebook** : toujours `facebook_insights` (ou `facebook_insights_country`, `facebook_insights_age_gender`, etc.)
+2. **TikTok perf** : toujours `tiktok_ads_reports_daily` (metriques deja extraites du JSON)
+3. **TikTok metadata** : `tiktok_campaigns`, `tiktok_ads`, `tiktok_ad_groups` (noms propres avec underscores)
+4. **Shopify PII** : toujours `_clean` (jamais les tables sans `_clean`)
+5. **Jointure TikTok** : reports → `tiktokads` (via ad_id) → `tiktokcampaigns` (via campaign_id)
 
 ---
 
@@ -313,7 +323,7 @@ SELECT
 FROM `hulken.ads_data.shopify_utm` u
 LEFT JOIN (
   SELECT campaign_name, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS depense
-  FROM `hulken.ads_data.facebook_ads_insights_dedup`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ) f ON u.first_utm_campaign = f.campaign_name
 WHERE u.first_utm_source LIKE '%facebook%'
@@ -332,16 +342,20 @@ SELECT
   ROUND(SUM(u.total_price) / NULLIF(t.depense, 0), 2) AS roas
 FROM `hulken.ads_data.shopify_utm` u
 LEFT JOIN (
+  -- Jointure : reports → ads → campaigns (campaign_id n'est pas dans reports)
   SELECT c.campaign_name,
-    ROUND(SUM(r.spend), 2) AS depense
-  FROM `hulken.ads_data.tiktokads_reports_clean` r
-  JOIN `hulken.ads_data.tiktokcampaigns` c ON r.campaign_id = c.campaign_id
+    ROUND(SUM(CAST(JSON_EXTRACT_SCALAR(r.metrics, '$.spend') AS FLOAT64)), 2) AS depense
+  FROM `hulken.ads_data.tiktokads_reports_daily` r
+  JOIN `hulken.ads_data.tiktokads` a ON r.ad_id = a.ad_id
+  JOIN `hulken.ads_data.tiktokcampaigns` c ON a.campaign_id = c.campaign_id
   GROUP BY 1
 ) t ON u.first_utm_campaign = t.campaign_name
-WHERE u.first_utm_source = 'tiktok'
+WHERE u.first_utm_source LIKE '%tiktok%'
 GROUP BY 1, t.depense
 ORDER BY revenu DESC
 ```
+
+> **Note** : Pour TikTok, la table `tiktokads_reports_daily` ne contient que `ad_id`. Il faut joindre via `tiktokads` (ad → campaign) puis `tiktokcampaigns` (campaign → nom).
 
 ### Rapport CAC (cout d'acquisition client par canal)
 
@@ -362,20 +376,20 @@ ORDER BY nouveaux_clients DESC
 
 ```sql
 WITH daily_fb AS (
-  SELECT date_start AS dt,
+  SELECT DATE(date_start) AS dt,
     ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS fb_spend
-  FROM `hulken.ads_data.facebook_ads_insights_dedup`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ),
 daily_tt AS (
   SELECT report_date AS dt,
     ROUND(SUM(spend), 2) AS tt_spend
-  FROM `hulken.ads_data.tiktokads_reports_clean`
+  FROM `hulken.ads_data.tiktok_ads_reports_daily`
   GROUP BY 1
 ),
 daily_rev AS (
   SELECT DATE(created_at) AS dt,
-    ROUND(SUM(total_price), 2) AS revenu,
+    ROUND(SUM(CAST(total_price AS FLOAT64)), 2) AS revenu,
     COUNT(*) AS commandes
   FROM `hulken.ads_data.shopify_utm`
   GROUP BY 1
@@ -515,7 +529,7 @@ Si ca ne marche toujours pas : ton compte Google n'a pas les droits sur le proje
 
 ### "La requete retourne 0 resultats"
 
-1. Verifie le nom de la table (les noms TikTok sont colles : `tiktokads` pas `tiktok_ads`)
+1. Verifie le nom de la table (utilise `tiktok_ads_reports_daily` pas `tiktokads_reports_daily`)
 2. Verifie la plage de dates - les donnees ne remontent pas au-dela de ~6 mois
 3. Lance le health check (requete 3.5) pour voir si la table a des donnees
 
@@ -528,7 +542,7 @@ Si ca ne marche toujours pas : ton compte Google n'a pas les droits sur le proje
 
 ### "Facebook montre X de depense mais BigQuery montre Y"
 
-1. Verifie que tu utilises `_dedup` (sinon les doublons gonflent les chiffres)
+1. Verifie que tu utilises `facebook_insights` (pas `facebook_ads_insights` directement)
 2. Facebook Ads Manager est en temps reel, BigQuery a 24h de retard
 3. La fenetre d'attribution Facebook peut faire varier les chiffres
 
@@ -550,8 +564,9 @@ Dataset          : ads_data
 Commandes        : shopify_live_orders_clean  (ou shopify_orders pour historique)
 Clients          : shopify_live_customers_clean
 Attribution      : shopify_utm
-Facebook         : facebook_ads_insights_dedup  (TOUJOURS avec _dedup)
-TikTok           : tiktokads_reports_clean  (ou tiktokads_reports_daily + JSON)
-Campagnes TikTok : tiktokcampaigns
+Facebook         : facebook_insights
+Facebook demo    : facebook_insights_age_gender, facebook_insights_country, facebook_insights_region
+TikTok           : tiktok_ads_reports_daily
+Campagnes TikTok : tiktok_campaigns
 VM Airbyte       : instance-20260129-133637 (zone us-central1-a)
 ```

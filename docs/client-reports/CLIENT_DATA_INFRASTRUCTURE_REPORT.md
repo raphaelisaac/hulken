@@ -193,7 +193,7 @@ Total Spend: EUR 335,326.08
 SELECT account_name, COUNT(*) as records,
        MIN(date_start) as first_date, MAX(date_start) as last_date,
        ROUND(SUM(spend), 2) as total_spend
-FROM `hulken.ads_data.ads_insights`
+FROM `hulken.ads_data.facebook_insights`
 GROUP BY 1
 ```
 | Account | Records | First Date | Last Date | Total Spend |
@@ -341,22 +341,22 @@ A custom Python script was developed that uses Shopify's GraphQL API to extract 
 | `ads_insights_dma` | 26,241 | 50 MB | DMA breakdown |
 | `ads_insights_platform_and_device` | 464,839 | 564 MB | Platform/device breakdown |
 
-**Views Available:** `facebook_ads_insights`, `facebook_campaigns`, `facebook_ad_sets`, etc. (these point to the base tables above)
+**Views Available:** `facebook_insights`, `facebook_campaigns`, `facebook_ad_sets`, etc. (these point to the base tables above)
 
 #### TikTok Marketing Tables (Dataset: ads_data)
 
 | Table | Rows | Size | Description |
 |-------|------|------|-------------|
 | `tiktokads` | 949 | 0.7 MB | Ad metadata |
-| `tiktokads_reports_daily` | 34,339 | 30 MB | Daily ad metrics |
+| `tiktok_ads_reports_daily` | 34,339 | 30 MB | Daily ad metrics |
 | `tiktokads_audience_reports_daily` | 229,513 | 117 MB | Ad audience metrics |
 | `tiktokads_audience_reports_by_country_daily` | 33,242 | 17 MB | Ad metrics by country |
 | `tiktokads_audience_reports_by_platform_daily` | 88,867 | 46 MB | Ad metrics by platform |
 | `tiktokads_audience_reports_by_province_daily` | 1,045,987 | 549 MB | Ad metrics by province |
-| `tiktokcampaigns` | 35 | 0.01 MB | Campaign metadata |
-| `tiktokcampaigns_reports_daily` | 5,743 | 2 MB | Daily campaign metrics |
-| `tiktokad_groups` | 71 | 0.07 MB | Ad group metadata |
-| `tiktokad_groups_reports_daily` | 6,632 | 3 MB | Daily ad group metrics |
+| `tiktok_campaigns` | 35 | 0.01 MB | Campaign metadata |
+| `tiktok_campaigns_reports_daily` | 5,743 | 2 MB | Daily campaign metrics |
+| `tiktok_ad_groups` | 71 | 0.07 MB | Ad group metadata |
+| `tiktok_ad_groups_reports_daily` | 6,632 | 3 MB | Daily ad group metrics |
 | `tiktokadvertisers_reports_daily` | 1,327 | 0.4 MB | Daily account metrics |
 
 #### Shopify Tables (Dataset: ads_data)
@@ -406,7 +406,7 @@ SELECT
   SUM(f.spend) as ad_spend,
   SUM(s.total_price) / NULLIF(SUM(f.spend), 0) as roas
 FROM `hulken.ads_data.shopify_utm` s
-LEFT JOIN `hulken.ads_data.ads_insights` f
+LEFT JOIN `hulken.ads_data.facebook_insights` f
   ON DATE(s.created_at) = f.date_start
 WHERE s.first_utm_source LIKE '%facebook%'
 GROUP BY 1, 2
@@ -470,12 +470,12 @@ ORDER BY revenue DESC
 -- Facebook vs TikTok spend comparison
 WITH fb AS (
   SELECT DATE(date_start) as dt, SUM(spend) as spend
-  FROM `hulken.ads_data.ads_insights`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ),
 tt AS (
   SELECT DATE(stat_time_day) as dt, SUM(spend) as spend
-  FROM `hulken.ads_data.tiktokads_reports_daily`
+  FROM `hulken.ads_data.tiktok_ads_reports_daily`
   GROUP BY 1
 )
 SELECT

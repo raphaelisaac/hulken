@@ -62,7 +62,7 @@ class DataReconciliation:
             ROUND(SUM(CAST(spend AS FLOAT64)), 2) as total_spend,
             SUM(CAST(impressions AS INT64)) as total_impressions,
             SUM(CAST(clicks AS INT64)) as total_clicks
-        FROM `hulken.ads_data.facebook_ads_insights`
+        FROM `hulken.ads_data.facebook_insights`
         GROUP BY account_name, account_id
         ORDER BY total_spend DESC
         """
@@ -104,7 +104,7 @@ class DataReconciliation:
                 "total_records": total_records,
                 "total_spend": total_spend,
                 "missing_accounts": missing,
-                "tables_checked": ["facebook_ads_insights"]
+                "tables_checked": ["facebook_insights"]
             }
 
             print(f"   {status}")
@@ -129,7 +129,7 @@ class DataReconciliation:
             COUNT(DISTINCT stat_time_day) as days,
             MIN(stat_time_day) as first_date,
             MAX(stat_time_day) as last_date
-        FROM `hulken.ads_data.tiktokads_reports_daily`
+        FROM `hulken.ads_data.tiktok_ads_reports_daily`
         """
 
         try:
@@ -141,7 +141,7 @@ class DataReconciliation:
             SELECT
                 ROUND(SUM(CAST(JSON_EXTRACT_SCALAR(metrics, '$.spend') AS FLOAT64)), 2) as total_spend,
                 SUM(CAST(JSON_EXTRACT_SCALAR(metrics, '$.impressions') AS INT64)) as impressions
-            FROM `hulken.ads_data.tiktokads_reports_daily`
+            FROM `hulken.ads_data.tiktok_ads_reports_daily`
             """
             metrics = list(self.bq_client.query(metrics_query).result())[0]
 
@@ -158,7 +158,7 @@ class DataReconciliation:
                 "date_range": f"{row.first_date} to {row.last_date}",
                 "total_spend": metrics.total_spend,
                 "impressions": metrics.impressions,
-                "tables_checked": ["tiktokads_reports_daily"]
+                "tables_checked": ["tiktok_ads_reports_daily"]
             }
 
             print(f"   {status}")
@@ -268,8 +268,8 @@ class DataReconciliation:
         print("\n⏰ Checking Data Freshness...")
 
         checks = [
-            ("Facebook", "SELECT MAX(date_start) as latest FROM `hulken.ads_data.facebook_ads_insights`"),
-            ("TikTok", "SELECT MAX(stat_time_day) as latest FROM `hulken.ads_data.tiktokads_reports_daily`"),
+            ("Facebook", "SELECT MAX(date_start) as latest FROM `hulken.ads_data.facebook_insights`"),
+            ("TikTok", "SELECT MAX(stat_time_day) as latest FROM `hulken.ads_data.tiktok_ads_reports_daily`"),
             ("Shopify Live", "SELECT MAX(DATE(updated_at)) as latest FROM `hulken.ads_data.shopify_live_orders`"),
             ("Shopify UTM", "SELECT MAX(DATE(extracted_at)) as latest FROM `hulken.ads_data.shopify_utm`"),
         ]

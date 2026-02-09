@@ -121,7 +121,7 @@ SELECT
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.spend') AS FLOAT64) AS spend,
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.impressions') AS INT64) AS impressions,
   CAST(JSON_EXTRACT_SCALAR(metrics, '$.clicks') AS INT64) AS clicks
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ```
 
 **Niveau Ad (publicite individuelle) :**

@@ -43,7 +43,7 @@ SELECT
   SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS INT64)) as conversions,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY year
 ORDER BY year
 ```
@@ -87,7 +87,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS FLOAT64)), 0), 2) as cpc,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= '2025-01-01'
 GROUP BY month
 ORDER BY month
@@ -126,7 +126,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS FLOAT64)), 0) * 100, 2) as ctr
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY campaign_type
 ORDER BY spend DESC
 ```
@@ -160,7 +160,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS FLOAT64)), 0) * 100, 2) as ctr
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 GROUP BY campaign
 HAVING SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS INT64)) > 100
 ORDER BY cpa ASC
@@ -195,7 +195,7 @@ SELECT
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS FLOAT64)), 0) * 100, 2) as ctr
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= '2025-10-01'
 GROUP BY ad_name, campaign
 HAVING SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS INT64)) > 50
@@ -228,7 +228,7 @@ SELECT
   ROUND(AVG(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 2) as avg_conversions,
   ROUND(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)) /
         NULLIF(SUM(CAST(JSON_VALUE(metrics, '$.conversion') AS FLOAT64)), 0), 2) as cpa
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE stat_time_day >= '2025-01-01'
 GROUP BY day_name, day_num
 ORDER BY day_num
@@ -279,7 +279,7 @@ SELECT
   SUM(CAST(JSON_VALUE(metrics, '$.likes') AS INT64)) as likes,
   SUM(CAST(JSON_VALUE(metrics, '$.comments') AS INT64)) as comments,
   SUM(CAST(JSON_VALUE(metrics, '$.shares') AS INT64)) as shares
-FROM `hulken.ads_data.tiktokads_reports_daily`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ```
 
 ---
@@ -335,7 +335,7 @@ Based on historical data, Q4 (especially November-December) represents the best 
 |-------|-------------|
 | **Project** | hulken |
 | **Dataset** | ads_data |
-| **Main Table** | tiktokads_reports_daily |
+| **Main Table** | tiktok_ads_reports_daily |
 | **Records** | 33,978 |
 | **Date Range** | June 16, 2022 - January 27, 2026 |
 | **Unique Ads** | 844 |

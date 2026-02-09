@@ -171,7 +171,7 @@ GROUP BY date ORDER BY date DESC""",
   ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend,
   SUM(impressions) AS impressions,
   SUM(clicks) AS clicks
-FROM `hulken.ads_data.facebook_ads_insights_dedup`
+FROM `hulken.ads_data.facebook_insights`
 WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
 GROUP BY campaign_name ORDER BY spend DESC""",
 
@@ -179,7 +179,7 @@ GROUP BY campaign_name ORDER BY spend DESC""",
   ROUND(SUM(spend), 2) AS spend,
   SUM(impressions) AS impressions,
   SUM(clicks) AS clicks
-FROM `hulken.ads_data.tiktokads_reports_clean`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
 GROUP BY date ORDER BY date DESC""",
 
@@ -192,10 +192,10 @@ WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY first_utm_source ORDER BY revenue DESC""",
 
         "Data Freshness Check": """SELECT 'facebook_ads' AS source, MAX(date_start) AS latest, DATE_DIFF(CURRENT_DATE(), MAX(date_start), DAY) AS days_behind
-FROM `hulken.ads_data.facebook_ads_insights_dedup`
+FROM `hulken.ads_data.facebook_insights`
 UNION ALL
 SELECT 'tiktok_ads', MAX(report_date), DATE_DIFF(CURRENT_DATE(), MAX(report_date), DAY)
-FROM `hulken.ads_data.tiktokads_reports_clean`
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 UNION ALL
 SELECT 'shopify_orders', MAX(DATE(created_at)), DATE_DIFF(CURRENT_DATE(), MAX(DATE(created_at)), DAY)
 FROM `hulken.ads_data.shopify_live_orders_clean`

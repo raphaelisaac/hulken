@@ -33,8 +33,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    BigQuery: hulken.ads_data                 │
 ├─────────────────────────────────────────────────────────────┤
-│  shopify_orders (585K)  │  facebook_ads_insights (159K)     │
-│  shopify_utm (589K)     │  tiktokads_reports_daily (28K)    │
+│  shopify_orders (585K)  │  facebook_insights (159K)         │
+│  shopify_utm (589K)     │  tiktok_ads_reports_daily (28K)   │
 │  shopify_live_* (8K)    │  + 55 autres tables               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -114,7 +114,7 @@
 
 ## 3. Tables Facebook
 
-### 3.1 facebook_ads_insights (Principal)
+### 3.1 facebook_insights (Principal)
 
 **Rows:** 159,342 | **Sync:** Horaire
 
@@ -154,7 +154,7 @@
 
 ## 4. Tables TikTok
 
-### 4.1 tiktokads_reports_daily (Principal)
+### 4.1 tiktok_ads_reports_daily (Principal)
 
 **Rows:** 28,723 | **Sync:** Horaire
 
@@ -176,7 +176,7 @@
 
 | Table | Description |
 |-------|-------------|
-| tiktokcampaigns | Métadonnées campagnes |
+| tiktok_campaigns | Métadonnées campagnes |
 | tiktokads | Métadonnées pubs |
 | tiktokads_reports_by_country_daily | Par pays |
 | tiktokads_audience_reports_daily | Audiences |
@@ -190,8 +190,8 @@
 | De → Vers | Clé | Exemple |
 |-----------|-----|---------|
 | shopify_utm → shopify_orders | order_id | Attribution |
-| shopify_utm → facebook_ads_insights | utm_campaign = campaign_name | ROAS |
-| shopify_utm → tiktokads_reports_daily | utm_campaign LIKE campaign_id | ROAS |
+| shopify_utm → facebook_insights | utm_campaign = campaign_name | ROAS |
+| shopify_utm → tiktok_ads_reports_daily | utm_campaign LIKE campaign_id | ROAS |
 | shopify_orders → shopify_live_customers_clean | email_hash | LTV |
 
 ### 5.2 Ce qui N'EST PAS Possible
@@ -214,12 +214,12 @@ SELECT
 FROM `hulken.ads_data.shopify_utm` u
 LEFT JOIN (
   SELECT campaign_name, SUM(spend) as spend
-  FROM `hulken.ads_data.facebook_ads_insights`
+  FROM `hulken.ads_data.facebook_insights`
   GROUP BY 1
 ) f ON u.first_utm_campaign = f.campaign_name
 LEFT JOIN (
   SELECT campaign_name, SUM(spend) as spend
-  FROM `hulken.ads_data.tiktokads_reports_daily`
+  FROM `hulken.ads_data.tiktok_ads_reports_daily`
   GROUP BY 1
 ) t ON u.first_utm_campaign = t.campaign_name
 WHERE u.first_utm_source IN ('facebook', 'tiktok')
@@ -285,11 +285,11 @@ SELECT
   MAX(_airbyte_extracted_at) as last_sync
 FROM `hulken.ads_data.shopify_live_orders`
 UNION ALL
-SELECT 'facebook_ads_insights', MAX(_airbyte_extracted_at)
-FROM `hulken.ads_data.facebook_ads_insights`
+SELECT 'facebook_insights', MAX(_airbyte_extracted_at)
+FROM `hulken.ads_data.facebook_insights`
 UNION ALL
-SELECT 'tiktokads_reports_daily', MAX(_airbyte_extracted_at)
-FROM `hulken.ads_data.tiktokads_reports_daily`
+SELECT 'tiktok_ads_reports_daily', MAX(_airbyte_extracted_at)
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
 ```
 
 ### Doublons
