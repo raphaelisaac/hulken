@@ -113,12 +113,29 @@ fi
 echo ""
 echo "[5/6] Installing Python packages..."
 
-pip3 install google-cloud-bigquery pandas pyarrow python-dotenv db-dtypes tabulate --quiet 2>/dev/null
-if [ $? -eq 0 ]; then
-    echo "  Python packages: OK"
+# Detect conda/miniforge environment
+if command -v conda &>/dev/null && [[ "$CONDA_DEFAULT_ENV" != "" || "$CONDA_PREFIX" != "" ]]; then
+    echo "  Conda environment detected: ${CONDA_DEFAULT_ENV:-base}"
+    echo "  Upgrading numpy + pandas first (avoid binary incompatibility)..."
+    conda install -y -c conda-forge numpy pandas pyarrow 2>/dev/null || true
+    pip3 install google-cloud-bigquery python-dotenv db-dtypes tabulate --quiet 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "  Python packages: OK (conda + pip)"
+    else
+        echo "  [WARNING] Some packages may have failed. Try:"
+        echo "  conda install -c conda-forge numpy pandas pyarrow"
+        echo "  pip3 install google-cloud-bigquery python-dotenv db-dtypes tabulate"
+    fi
 else
-    echo "  [WARNING] Some packages may have failed. Try:"
-    echo "  pip3 install google-cloud-bigquery pandas pyarrow python-dotenv db-dtypes tabulate"
+    echo "  Using pip (no conda detected)..."
+    pip3 install --upgrade numpy 2>/dev/null
+    pip3 install google-cloud-bigquery pandas pyarrow python-dotenv db-dtypes tabulate --quiet 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "  Python packages: OK"
+    else
+        echo "  [WARNING] Some packages may have failed. Try:"
+        echo "  pip3 install google-cloud-bigquery pandas pyarrow python-dotenv db-dtypes tabulate"
+    fi
 fi
 
 # ============================================================
