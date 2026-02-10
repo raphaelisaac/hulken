@@ -559,7 +559,24 @@ python data_validation/reconciliation_check.py --start 2026-01-01 --end 2026-01-
 
 **Output:** `data_validation/reconciliation_results.json` (full JSON report)
 
-### 8.2 Visual HTML report
+### 8.2 Live reconciliation (API vs BigQuery demo)
+
+```bash
+# Compare Facebook & TikTok API data against BigQuery in real-time
+python data_validation/live_reconciliation.py
+
+# Compare last 14 days instead of 7
+python data_validation/live_reconciliation.py --days 14
+
+# Skip animation (faster output)
+python data_validation/live_reconciliation.py --no-animation
+```
+
+This script calls the Facebook Marketing API and TikTok Marketing API directly, then queries BigQuery, and shows a side-by-side comparison for each metric (spend, impressions, clicks) with MATCH/MISMATCH status. Designed as a visual demo to prove data integrity.
+
+**8 steps:** Connect to BigQuery -> Facebook API -> Facebook BQ -> Compare -> TikTok API -> TikTok BQ -> Compare -> Final Scoreboard
+
+### 8.3 Visual HTML report
 
 ```bash
 python data_validation/reconciliation_report.py
@@ -572,7 +589,7 @@ This generates an HTML report at `data_validation/reconciliation_report.html` an
 - UTM: attribution rate
 - Freshness of each source
 
-### 8.3 Manual verification (spot check)
+### 8.4 Manual verification (spot check)
 
 To verify that a number in BigQuery matches the source:
 
