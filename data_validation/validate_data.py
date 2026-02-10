@@ -99,12 +99,12 @@ def get_bigquery_tiktok_stats(client, start_date, end_date):
     """Get TikTok stats from BigQuery"""
     query = f"""
     SELECT
-        COALESCE(SUM(CAST(JSON_VALUE(metrics, '$.spend') AS FLOAT64)), 0) as total_spend,
-        COALESCE(SUM(CAST(JSON_VALUE(metrics, '$.impressions') AS INT64)), 0) as total_impressions,
-        COALESCE(SUM(CAST(JSON_VALUE(metrics, '$.clicks') AS INT64)), 0) as total_clicks,
+        COALESCE(SUM(spend), 0) as total_spend,
+        COALESCE(SUM(impressions), 0) as total_impressions,
+        COALESCE(SUM(clicks), 0) as total_clicks,
         COUNT(*) as row_count
     FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
-    WHERE CAST(stat_time_day AS DATE) BETWEEN '{start_date}' AND '{end_date}'
+    WHERE report_date BETWEEN '{start_date}' AND '{end_date}'
     """
     try:
         result = client.query(query).result()

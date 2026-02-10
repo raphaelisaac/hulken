@@ -314,7 +314,7 @@ class SOCValidator:
             elif platform == "facebook":
                 critical_fields = ["ad_id", "spend", "impressions", "date_start"]
             elif platform == "tiktok":
-                critical_fields = ["ad_id", "stat_time_day"]
+                critical_fields = ["ad_id", "report_date"]
             else:
                 critical_fields = [config["primary_key"]]
 

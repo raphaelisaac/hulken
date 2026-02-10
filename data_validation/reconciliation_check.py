@@ -121,7 +121,7 @@ class ReconciliationCheck:
             },
             {
                 'name': 'TikTok Ads',
-                'sql': f"SELECT MAX(DATE(stat_time_day)) FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`",
+                'sql': f"SELECT MAX(report_date) FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`",
                 'connector': 'Airbyte TikTok Marketing',
                 'daily_spend': AVG_DAILY_SPEND['tiktok'],
             },
@@ -199,6 +199,9 @@ class ReconciliationCheck:
     def check_duplicates(self):
         print("\n=== DUPLICATE DETECTION ===")
 
+        # Raw tables where duplicates are expected (analysts use _clean versions)
+        RAW_TABLES_WITH_CLEAN = {'shopify_live_orders', 'shopify_live_customers'}
+
         tables = [
             ("shopify_live_orders", "id", "Airbyte Shopify sync"),
             ("shopify_live_orders_clean", "id", "PII hash scheduled query"),
@@ -220,17 +223,29 @@ class ReconciliationCheck:
                     self.add(f"Duplicates: {table}", "PASS", f"0 duplicates ({row.total:,} rows)")
                 else:
                     pct = dupes / row.total * 100
-                    if pct < 1:
+                    if table in RAW_TABLES_WITH_CLEAN:
+                        # Raw table — duplicates are expected from Airbyte incremental sync.
+                        # Analysts use the _clean version which has 0 duplicates.
                         status = "WARNING"
+                        self.add(f"Duplicates: {table}", status,
+                                 f"{dupes:,} duplicates ({pct:.1f}%) on {row.total:,} rows — raw table, use {table}_clean instead",
+                                 diagnosis={
+                                     'cause': f"Raw Airbyte table. Duplicate {pk} values from overlapping incremental sync windows. This is expected behavior.",
+                                     'impact': f"No analyst impact — the {table}_clean version has 0 duplicates and is the table used for analysis.",
+                                     'action': f"No action needed. Always use `{table}_clean` for queries. Raw table duplicates are normal for Airbyte incremental sync."
+                                 })
                     else:
-                        status = "FAIL"
-                    self.add(f"Duplicates: {table}", status,
-                             f"{dupes:,} duplicates ({pct:.1f}%) on {row.total:,} rows",
-                             diagnosis={
-                                 'cause': f"Source: {source}. Duplicate {pk} values found, likely from overlapping incremental sync windows or script re-runs.",
-                                 'impact': f"SUM/COUNT queries on this table will be inflated by {pct:.1f}%. Revenue and order metrics are overstated.",
-                                 'action': f"Deduplicate: CREATE VIEW {table}_dedup AS SELECT * EXCEPT(rn) FROM (SELECT *, ROW_NUMBER() OVER(PARTITION BY {pk} ORDER BY _airbyte_extracted_at DESC) rn FROM {table}) WHERE rn=1"
-                             })
+                        if pct < 1:
+                            status = "WARNING"
+                        else:
+                            status = "FAIL"
+                        self.add(f"Duplicates: {table}", status,
+                                 f"{dupes:,} duplicates ({pct:.1f}%) on {row.total:,} rows",
+                                 diagnosis={
+                                     'cause': f"Source: {source}. Duplicate {pk} values found, likely from overlapping incremental sync windows or script re-runs.",
+                                     'impact': f"SUM/COUNT queries on this table will be inflated by {pct:.1f}%. Revenue and order metrics are overstated.",
+                                     'action': f"Deduplicate: CREATE VIEW {table}_dedup AS SELECT * EXCEPT(rn) FROM (SELECT *, ROW_NUMBER() OVER(PARTITION BY {pk} ORDER BY _airbyte_extracted_at DESC) rn FROM {table}) WHERE rn=1"
+                                 })
             except Exception as e:
                 self.add(f"Duplicates: {table}", "ERROR", str(e))
 
@@ -261,7 +276,7 @@ class ReconciliationCheck:
         try:
             sql = f"""
             SELECT COUNT(*) AS total,
-              COUNT(DISTINCT CONCAT(CAST(ad_id AS STRING), '|', CAST(stat_time_day AS STRING))) AS distinct_keys
+              COUNT(DISTINCT CONCAT(CAST(ad_id AS STRING), '|', CAST(report_date AS STRING))) AS distinct_keys
             FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
             """
             row = self.query(sql)[0]
@@ -275,7 +290,7 @@ class ReconciliationCheck:
                          diagnosis={
                              'cause': "TikTok Airbyte connector is configured as incremental_deduped_history, so duplicates indicate a primary key issue.",
                              'impact': f"TikTok spend totals may be inflated by {pct:.1f}%.",
-                             'action': "Check Airbyte TikTok connection primary key configuration. Expected: (ad_id, stat_time_day)."
+                             'action': "Check Airbyte TikTok connection primary key configuration. Expected: (ad_id, report_date)."
                          })
         except Exception as e:
             self.add("Duplicates: tiktok_reports", "ERROR", str(e))
@@ -470,9 +485,9 @@ class ReconciliationCheck:
                       )) AS date
                     ),
                     data_dates AS (
-                      SELECT DATE(stat_time_day) AS d, COUNT(*) AS cnt
+                      SELECT report_date AS d, COUNT(*) AS cnt
                       FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktok_ads_reports_daily`
-                      WHERE DATE(stat_time_day) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+                      WHERE report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
                       GROUP BY d
                     )
                     SELECT d.date FROM dates d LEFT JOIN data_dates t ON d.date = t.d
@@ -533,8 +548,8 @@ class ReconciliationCheck:
             ("facebook_insights", "spend", "Ad spend tracking"),
             ("facebook_insights", "date_start", "Date partitioning"),
             ("facebook_insights", "ad_id", "Ad-level attribution"),
-            ("tiktok_ads_reports_daily", "metrics", "Performance metrics"),
-            ("tiktok_ads_reports_daily", "stat_time_day", "Date partitioning"),
+            ("tiktok_ads_reports_daily", "spend", "Spend tracking"),
+            ("tiktok_ads_reports_daily", "report_date", "Date partitioning"),
         ]
 
         for table, field, purpose in field_checks:

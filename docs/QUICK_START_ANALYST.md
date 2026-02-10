@@ -14,8 +14,9 @@
 5. [Les tables importantes](#5-les-tables-importantes)
 6. [Lancer un rapport](#6-lancer-un-rapport)
 7. [Rafraichir les donnees (syncs)](#7-rafraichir-les-donnees-syncs)
-8. [Explorer avec le dashboard](#8-explorer-avec-le-dashboard)
-9. [En cas de probleme](#9-en-cas-de-probleme)
+8. [Verifier l'integrite des donnees (Reconciliation)](#8-verifier-lintegrite-des-donnees-reconciliation)
+9. [Explorer avec le dashboard Streamlit](#9-explorer-avec-le-dashboard-streamlit)
+10. [En cas de probleme](#10-en-cas-de-probleme)
 
 ---
 
@@ -142,6 +143,30 @@ ORDER BY 1 DESC
 
 > Utilise toujours `facebook_insights` (pas `facebook_ads_insights` qui est la table brute Airbyte).
 
+### 3.2b Depenses Facebook par campagne (comme TikTok)
+
+```sql
+-- Vue facebook_campaigns_daily : equivalent de tiktokcampaigns_reports_daily
+SELECT
+  campaign_name,
+  account_name,
+  date_start AS date,
+  spend,
+  impressions,
+  clicks,
+  ad_count
+FROM `hulken.ads_data.facebook_campaigns_daily`
+WHERE date_start >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+ORDER BY spend DESC
+```
+
+> **3 comptes Facebook** sont disponibles :
+> - `Hulken` = compte **US** (le plus gros, ~$8M de depense totale)
+> - `Hulken Europe` = compte **EU** (~$345K de depense)
+> - `Hulken Canada` = compte **CA** (arrete en dec 2024, ~$11K)
+>
+> Pour filtrer par region : `WHERE account_name = 'Hulken'` (US) ou `WHERE account_name = 'Hulken Europe'`
+
 ### 3.3 Depenses TikTok par jour
 
 ```sql
@@ -199,6 +224,8 @@ ORDER BY heures_retard DESC
 - `facebook_ads_insights` : < 30h = OK, > 48h = PROBLEME
 - `tiktokads_reports_daily` : < 30h = OK
 - `shopify_utm` : < 24h = OK
+
+> **Alternative plus complete** : lancer `python data_validation/reconciliation_check.py --checks freshness,sync_lag` qui verifie tout automatiquement avec diagnostics.
 
 ---
 
@@ -277,7 +304,8 @@ LIMIT 5
 | `shopify_live_customers_clean` | Clients (Airbyte) | id, email_hash, total_spent, orders_count |
 | `shopify_utm` | Attribution UTM par commande | order_id, total_price, first_utm_source, first_utm_campaign |
 | `shopify_orders` | Historique complet (585K commandes) | id, name, totalPrice, createdAt, email_hash |
-| `facebook_insights` | Performance Facebook | campaign_name, date_start, spend, impressions, clicks |
+| `facebook_insights` | Performance Facebook (par ad/jour) | campaign_name, date_start, spend, impressions, clicks, account_name |
+| `facebook_campaigns_daily` | Performance Facebook (par campagne/jour) | campaign_name, date_start, spend, impressions, clicks, account_name |
 | `tiktok_ads_reports_daily` | Performance TikTok | campaign_id, report_date, spend, impressions, clicks |
 | `tiktok_campaigns` | Noms des campagnes TikTok | campaign_id, campaign_name |
 
@@ -491,27 +519,127 @@ gcloud compute ssh Jarvis@instance-20260129-133637 --zone=us-central1-a --tunnel
 
 ---
 
-## 8. Explorer avec le dashboard
+## 8. Verifier l'integrite des donnees (Reconciliation)
 
-Un dashboard Streamlit existe pour explorer les tables visuellement.
+Deux scripts de reconciliation permettent de verifier que toutes les donnees sont presentes, fraiches, et coherentes.
+
+### 8.1 Reconciliation complete (10 checks, 56 tests)
 
 ```bash
-# Depuis le dossier du projet
+cd D:\Better_signal     # Windows
+cd ~/Better_signal      # Mac
+
+# Lancer tous les checks
+python data_validation/reconciliation_check.py
+
+# Lancer uniquement certains checks
+python data_validation/reconciliation_check.py --checks freshness,duplicates
+python data_validation/reconciliation_check.py --checks facebook_daily,ga4
+
+# Specifier une plage de dates
+python data_validation/reconciliation_check.py --start 2026-01-01 --end 2026-01-31
+```
+
+**Ce que ca verifie (10 categories) :**
+
+| Check | Ce qu'il fait |
+|-------|--------------|
+| `freshness` | Derniere date de chaque source (Facebook, TikTok, Shopify, UTM) |
+| `duplicates` | Doublons dans chaque table (les tables `_clean` doivent etre a 0%) |
+| `pii` | Zero email/telephone/nom en clair dans les tables brutes |
+| `hashes` | Tous les SHA256 font 64 caracteres, match cross-table > 70% |
+| `continuity` | Aucun jour manquant dans les 30 derniers jours |
+| `nulls` | Champs critiques (spend, date, ad_id) jamais NULL |
+| `pii_schedule` | Le scheduled query PII tourne bien toutes les 5 min |
+| `facebook_daily` | Depenses Facebook par jour (dedupliquees) |
+| `ga4` | Fraicheur des 3 proprietes GA4 (EU, US, CA) |
+| `sync_lag` | Heures depuis la derniere maj de chaque table |
+
+**Resultat attendu :** 56/56 PASS (les doublons dans les tables brutes Shopify sont des WARNING, pas des FAIL — les tables `_clean` sont propres).
+
+**Sortie :** `data_validation/reconciliation_results.json` (rapport JSON complet)
+
+### 8.2 Rapport HTML visuel
+
+```bash
+python data_validation/reconciliation_report.py
+```
+
+Ca genere un rapport HTML dans `data_validation/reconciliation_report.html` et l'ouvre dans le navigateur. Le rapport montre :
+- Facebook : records, spend par compte, comptes manquants
+- TikTok : records, spend total, plage de dates
+- Shopify : commandes, revenu, clients uniques
+- UTM : taux d'attribution
+- Fraicheur de chaque source
+
+### 8.3 Verifier manuellement (spot check)
+
+Pour verifier qu'un chiffre dans BigQuery correspond a la source :
+
+```sql
+-- Exemple : depense Facebook du 8 fevrier
+SELECT ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS depense
+FROM `hulken.ads_data.facebook_insights`
+WHERE date_start = '2026-02-08'
+-- Resultat attendu : ~$21,491 (compare avec Facebook Ads Manager)
+
+-- Exemple : depense TikTok du 8 fevrier
+SELECT ROUND(SUM(spend), 2) AS depense
+FROM `hulken.ads_data.tiktok_ads_reports_daily`
+WHERE report_date = '2026-02-08'
+-- Compare avec TikTok Ads Manager
+```
+
+---
+
+## 9. Explorer avec le dashboard Streamlit
+
+Un dashboard Streamlit existe pour explorer toutes les tables visuellement, ecrire des requetes, et exporter en CSV.
+
+### Lancer le dashboard
+
+```bash
 cd D:\Better_signal     # Windows
 cd ~/Better_signal      # Mac
 
 streamlit run data_explorer.py
 ```
 
-Ca ouvre un navigateur avec :
-- **Schema** : toutes les colonnes d'une table
-- **Preview** : voir les 100 premieres lignes
-- **Query + Export** : ecrire du SQL et telecharger en CSV
-- **Overview** : toutes les tables avec taille et date
+Ca ouvre un navigateur (http://localhost:8501) avec 4 onglets :
+- **Schema** : toutes les colonnes d'une table avec types et taille
+- **Preview** : voir les 100 premieres lignes de n'importe quelle table
+- **Query + Export** : ecrire du SQL libre, voir les resultats, telecharger en CSV
+- **Overview** : toutes les tables du dataset avec nb lignes, taille, derniere maj
+
+### Datasets disponibles
+
+| Dataset | Contenu |
+|---------|---------|
+| `ads_data` | Shopify, Facebook, TikTok, UTM (dataset principal) |
+| `google_Ads` | Google Ads (190 tables, integration native) |
+| `analytics_334792038` | Google Analytics 4 - Europe |
+| `analytics_454869667` | Google Analytics 4 - USA |
+| `analytics_454871405` | Google Analytics 4 - Canada |
+
+### Requetes rapides integrees
+
+Le dashboard inclut des requetes pre-faites (onglet Query + Export > Quick Queries) :
+- Revenue journalier (30 jours)
+- Facebook spend par campagne
+- TikTok daily spend
+- UTM attribution par source
+- Data freshness check
+- Google Ads daily spend
+
+### Exporter en CSV
+
+1. Lance une requete dans l'onglet "Query + Export"
+2. Clique sur "Download CSV" sous les resultats
+3. Le fichier est telecharge directement
 
 ---
 
-## 9. En cas de probleme
+## 10. En cas de probleme
 
 ### "Je n'arrive pas a me connecter a BigQuery"
 
@@ -550,8 +678,11 @@ Si ca ne marche toujours pas : ton compte Google n'a pas les droits sur le proje
 
 | Quoi | Commande |
 |------|---------|
-| Verifier la sante des donnees | `python data_validation/reconciliation_check.py` |
-| Dashboard d'exploration | `streamlit run data_explorer.py` |
+| Reconciliation complete (56 tests) | `python data_validation/reconciliation_check.py` |
+| Reconciliation live (API vs BigQuery) | `python data_validation/live_reconciliation.py` |
+| Rapport HTML visuel | `python data_validation/reconciliation_report.py` |
+| Dashboard Streamlit | `streamlit run data_explorer.py` |
+| Reconciliation rapide (2 checks) | `python data_validation/reconciliation_check.py --checks freshness,duplicates` |
 | Relancer tous les syncs | Voir section 7 |
 
 ---
@@ -559,14 +690,33 @@ Si ca ne marche toujours pas : ton compte Google n'a pas les droits sur le proje
 ## Aide-memoire
 
 ```
-Projet GCP      : hulken
-Dataset          : ads_data
-Commandes        : shopify_live_orders_clean  (ou shopify_orders pour historique)
-Clients          : shopify_live_customers_clean
-Attribution      : shopify_utm
-Facebook         : facebook_insights
-Facebook demo    : facebook_insights_age_gender, facebook_insights_country, facebook_insights_region
-TikTok           : tiktok_ads_reports_daily
-Campagnes TikTok : tiktok_campaigns
-VM Airbyte       : instance-20260129-133637 (zone us-central1-a)
+Projet GCP        : hulken
+Dataset principal : ads_data
+Dataset Google Ads: google_Ads
+
+-- SHOPIFY --
+Commandes         : shopify_live_orders_clean  (ou shopify_orders pour historique)
+Clients           : shopify_live_customers_clean
+Attribution       : shopify_utm
+
+-- FACEBOOK (3 comptes) --
+Hulken (US)       : account_id 440461496366294  ($8M spend, depuis fev 2024)
+Hulken Europe     : account_id 1673934429844193 ($345K spend, depuis oct 2024)
+Hulken Canada     : account_id 1686648438857084 ($11K spend, arrete dec 2024)
+Facebook metrics  : facebook_insights
+Facebook campagnes: facebook_campaigns_daily (vue agregee par campagne/jour)
+Facebook demo     : facebook_insights_age_gender, facebook_insights_country, facebook_insights_region
+
+-- TIKTOK --
+TikTok metrics    : tiktok_ads_reports_daily
+Campagnes TikTok  : tiktok_campaigns
+
+-- GOOGLE ADS --
+Google Ads stats  : google_Ads.ads_CampaignBasicStats_4354001000 (metrics_cost_micros / 1e6 = USD)
+
+-- OUTILS --
+VM Airbyte        : instance-20260129-133637 (zone us-central1-a)
+Reconciliation    : python data_validation/reconciliation_check.py
+Live recon (demo) : python data_validation/live_reconciliation.py
+Dashboard         : streamlit run data_explorer.py
 ```

@@ -89,7 +89,7 @@ PLATFORMS = {
         "tables": ["tiktok_ads"],
         "primary_key": "ad_id",
         "spend_field": "metrics.spend",
-        "date_field": "stat_time_day",
+        "date_field": "report_date",
     },
 }
 

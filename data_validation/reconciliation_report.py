@@ -126,9 +126,9 @@ class DataReconciliation:
         query = """
         SELECT
             COUNT(*) as records,
-            COUNT(DISTINCT stat_time_day) as days,
-            MIN(stat_time_day) as first_date,
-            MAX(stat_time_day) as last_date
+            COUNT(DISTINCT report_date) as days,
+            MIN(report_date) as first_date,
+            MAX(report_date) as last_date
         FROM `hulken.ads_data.tiktok_ads_reports_daily`
         """
 
@@ -139,8 +139,8 @@ class DataReconciliation:
             # Also check metrics
             metrics_query = """
             SELECT
-                ROUND(SUM(CAST(JSON_EXTRACT_SCALAR(metrics, '$.spend') AS FLOAT64)), 2) as total_spend,
-                SUM(CAST(JSON_EXTRACT_SCALAR(metrics, '$.impressions') AS INT64)) as impressions
+                ROUND(SUM(spend), 2) as total_spend,
+                SUM(impressions) as impressions
             FROM `hulken.ads_data.tiktok_ads_reports_daily`
             """
             metrics = list(self.bq_client.query(metrics_query).result())[0]
@@ -269,7 +269,7 @@ class DataReconciliation:
 
         checks = [
             ("Facebook", "SELECT MAX(date_start) as latest FROM `hulken.ads_data.facebook_insights`"),
-            ("TikTok", "SELECT MAX(stat_time_day) as latest FROM `hulken.ads_data.tiktok_ads_reports_daily`"),
+            ("TikTok", "SELECT MAX(report_date) as latest FROM `hulken.ads_data.tiktok_ads_reports_daily`"),
             ("Shopify Live", "SELECT MAX(DATE(updated_at)) as latest FROM `hulken.ads_data.shopify_live_orders`"),
             ("Shopify UTM", "SELECT MAX(DATE(extracted_at)) as latest FROM `hulken.ads_data.shopify_utm`"),
         ]

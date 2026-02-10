@@ -4,11 +4,18 @@ Better Signal - Data Explorer Dashboard
 Visual exploration of all BigQuery tables, schemas, and CSV export
 Launch: streamlit run data_explorer.py
 """
+import os
 import streamlit as st
 import pandas as pd
 from google.cloud import bigquery
 
 st.set_page_config(page_title="Better Signal - Data Explorer", layout="wide")
+
+# Set credentials if not already configured
+if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+    creds_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hulken-fb56a345ac08.json')
+    if os.path.exists(creds_path):
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds_path
 
 @st.cache_resource
 def get_client():
@@ -24,6 +31,7 @@ st.sidebar.markdown("Data Explorer")
 
 DATASETS = {
     "ads_data": "Shopify, Facebook, TikTok, UTM",
+    "google_Ads": "Google Ads",
     "analytics_334792038": "Google Analytics 4 (EU)",
     "analytics_454869667": "Google Analytics 4 (US)",
     "analytics_454871405": "Google Analytics 4 (CA)",
@@ -203,6 +211,14 @@ UNION ALL
 SELECT 'shopify_utm', MAX(DATE(created_at)), DATE_DIFF(CURRENT_DATE(), MAX(DATE(created_at)), DAY)
 FROM `hulken.ads_data.shopify_utm`
 ORDER BY source""",
+
+        "Google Ads Daily Spend": """SELECT _DATA_DATE AS date,
+  ROUND(SUM(metrics_cost_micros) / 1e6, 2) AS spend_usd,
+  SUM(metrics_impressions) AS impressions,
+  SUM(metrics_clicks) AS clicks
+FROM `hulken.google_Ads.ads_CampaignBasicStats_4354001000`
+WHERE _DATA_DATE >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+GROUP BY date ORDER BY date DESC""",
     }
 
     for name, sql in quick_queries.items():
