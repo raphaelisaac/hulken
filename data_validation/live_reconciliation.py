@@ -10,8 +10,10 @@ and shows a side-by-side comparison with match/mismatch indicators.
 
 Usage:
     python data_validation/live_reconciliation.py
-    python data_validation/live_reconciliation.py --days 14
+    python data_validation/live_reconciliation.py --days 30
+    python data_validation/live_reconciliation.py --start-date 2025-01-01 --end-date 2025-01-31
     python data_validation/live_reconciliation.py --no-animation
+    python data_validation/live_reconciliation.py --tolerance 5
 """
 
 import os
@@ -275,15 +277,58 @@ def get_bq_tiktok_stats(client, start_date, end_date):
 # ============================================================
 # MAIN
 # ============================================================
+def get_bq_data_freshness(client, platform):
+    """Check when BigQuery data was last synced for a platform."""
+    if platform == 'facebook':
+        sql = f"""
+        SELECT MAX(_airbyte_extracted_at) AS last_sync
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.facebook_ads_insights`
+        """
+    elif platform == 'tiktok':
+        sql = f"""
+        SELECT MAX(_airbyte_extracted_at) AS last_sync
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`
+        """
+    else:
+        return None
+    try:
+        row = list(client.query(sql).result())[0]
+        return row.last_sync
+    except Exception:
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description='Live Reconciliation Demo')
-    parser.add_argument('--days', type=int, default=7, help='Number of days to compare (default: 7)')
+    parser.add_argument('--days', type=int, default=14, help='Number of days to compare (default: 14)')
+    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD). Overrides --days')
+    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD). Overrides default')
+    parser.add_argument('--tolerance', type=float, default=None, help='Match tolerance in percent (default: 2)')
     parser.add_argument('--no-animation', action='store_true', help='Disable animation delays')
     args = parser.parse_args()
 
+    global TOLERANCE
+    if args.tolerance is not None:
+        TOLERANCE = args.tolerance / 100.0
+
     animated = not args.no_animation
-    end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=args.days)).strftime('%Y-%m-%d')
+
+    # Date handling: custom dates override --days
+    if args.start_date and args.end_date:
+        start_date = args.start_date
+        end_date = args.end_date
+    elif args.start_date:
+        start_date = args.start_date
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    else:
+        # Default: exclude last 2 days for attribution window settling
+        end_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=2 + args.days)).strftime('%Y-%m-%d')
+
+    # Calculate display days
+    d_start = datetime.strptime(start_date, '%Y-%m-%d')
+    d_end = datetime.strptime(end_date, '%Y-%m-%d')
+    num_days = (d_end - d_start).days + 1
 
     # Title
     print()
@@ -292,7 +337,7 @@ def main():
     print(f"  {C.CYAN}{C.BOLD}   API vs BigQuery — Real-time Comparison{C.END}")
     print(f"  {C.CYAN}{C.BOLD}{'=' * 54}{C.END}")
     print(f"  {C.DIM}  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.END}")
-    print(f"  {C.DIM}  Period:    {start_date} to {end_date} ({args.days} days){C.END}")
+    print(f"  {C.DIM}  Period:    {start_date} to {end_date} ({num_days} days){C.END}")
     print(f"  {C.DIM}  Tolerance: {TOLERANCE*100:.0f}%{C.END}")
 
     all_results = []  # (platform, metric, match_bool)
@@ -306,6 +351,13 @@ def main():
         # Quick test query
         list(bq_client.query(f"SELECT 1").result())
         print(f"  {C.GREEN}  Connected to project '{BQ_PROJECT}', dataset '{BQ_DATASET}'{C.END}")
+        # Show data freshness
+        for plat in ['facebook', 'tiktok']:
+            last_sync = get_bq_data_freshness(bq_client, plat)
+            if last_sync:
+                hours_ago = (datetime.utcnow() - last_sync.replace(tzinfo=None)).total_seconds() / 3600
+                freshness_color = C.GREEN if hours_ago < 24 else C.YELLOW if hours_ago < 48 else C.RED
+                print(f"  {C.DIM}  {plat.title()} last sync: {freshness_color}{last_sync.strftime('%Y-%m-%d %H:%M')} UTC ({hours_ago:.0f}h ago){C.END}")
     except Exception as e:
         print(f"  {C.RED}  FAILED: {e}{C.END}")
         print(f"\n  {C.RED}Cannot proceed without BigQuery connection.{C.END}")
@@ -355,6 +407,13 @@ def main():
         name = fb_account_names[acct_id]
         api = fb_api_results[acct_id]
         bq = fb_bq_results[acct_id]
+
+        # Skip zero-data accounts (e.g. dormant Canada account)
+        if api['spend'] == 0 and api['impressions'] == 0 and bq['spend'] == 0 and bq['impressions'] == 0:
+            print(f"\n  {C.YELLOW}  {name}: No activity in this period — skipped{C.END}")
+            print(f"  {C.DIM}  Tip: Try a different date range (e.g. --start-date 2024-11-01 --end-date 2024-12-01){C.END}")
+            all_results.append((f"Facebook ({name})", "All metrics", None))  # None = skipped
+            continue
 
         comparisons = [
             ("Spend", api['spend'], bq['spend'], format_money),
@@ -426,8 +485,12 @@ def main():
 
     animate_delay(0.5, animated)
 
-    total_checks = len(all_results)
-    total_match = sum(1 for _, _, m in all_results if m)
+    # Separate actual checks from skipped
+    actual_results = [(p, m, v) for p, m, v in all_results if v is not None]
+    skipped_results = [(p, m) for p, m, v in all_results if v is None]
+
+    total_checks = len(actual_results)
+    total_match = sum(1 for _, _, m in actual_results if m)
     total_mismatch = total_checks - total_match
 
     width = 54
@@ -439,13 +502,16 @@ def main():
     print(f"  {C.DIM}║{C.END}  Tolerance: {TOLERANCE*100:.0f}%")
     print(f"  {C.CYAN}{'─' * width}{C.END}")
 
-    for platform, metric, matched in all_results:
+    for platform, metric, matched in actual_results:
         animate_delay(0.1, animated)
         if matched:
             icon = f"{C.GREEN}MATCH{C.END}"
         else:
             icon = f"{C.RED}MISMATCH{C.END}"
         print(f"  {C.DIM}║{C.END}  {platform:<28} {metric:<14} {icon}")
+
+    for platform, metric in skipped_results:
+        print(f"  {C.DIM}║{C.END}  {platform:<28} {metric:<14} {C.YELLOW}SKIPPED (no data){C.END}")
 
     print(f"  {C.CYAN}{'─' * width}{C.END}")
 
@@ -455,6 +521,9 @@ def main():
         print(f"  {C.GREEN}{C.BOLD}  RESULT: {total_match}/{total_checks} MATCH — Data integrity confirmed{C.END}")
     else:
         print(f"  {C.RED}{C.BOLD}  RESULT: {total_match}/{total_checks} MATCH, {total_mismatch} MISMATCH{C.END}")
+
+    if skipped_results:
+        print(f"  {C.YELLOW}  ({len(skipped_results)} account(s) skipped — no activity in period){C.END}")
 
     print(f"  {C.CYAN}{'=' * width}{C.END}")
     print()
