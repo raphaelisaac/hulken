@@ -185,30 +185,32 @@ Date        Platform         Spend      Revenue    Orders  ROAS
 
 Full audit: **[NULL_AUDIT_BIGQUERY.md](NULL_AUDIT_BIGQUERY.md)** — every NULL column classified as bug / API design / expected.
 
-### BUG 1: PII script wiped emails BEFORE hashing (CRITICAL)
+### BUG 1: PII script wiped emails BEFORE hashing (CRITICAL) — FIX READY, needs execution
 
-The PII scheduled query runs `SET email = NULL` before the hash step completes. Result:
+The PII nullify script ran `SET email = NULL` in raw tables. The clean refresh then tries `SHA256(email)` on NULL → produces NULL hash. Raw tables have **no `email_hash` column** — the only hashing happens during clean refresh.
 
-| Table | `email_hash` NULL rate | Expected |
+| Table | `email_hash` NULL rate | Expected after fix |
 |-------|----------------------|----------|
-| `shopify_live_customers_clean` | **59% NULL** (14,026/23,624) | ~0% |
+| `shopify_live_customers_clean` | **59% NULL** (14,026/23,624) | ~2% |
 | `shopify_live_orders_clean` | **50.5% NULL** (8,589/17,021) | ~2% |
 
 Also: `first_name_hash`, `last_name_hash`, `phone_hash` are 99.5% NULL in customers_clean.
 
-**Fix:** Hash first, nullify second. **Workaround:** Use `last_order_id` to join customers ↔ orders.
+**Fix applied (code):** `scheduled_refresh_clean_tables.sql` updated to save existing hashes into temp table before `CREATE OR REPLACE`, then restore via `UPDATE ... COALESCE(new_hash, saved_hash)`.
 
-### BUG 2: TikTok view reads wrong columns (MEDIUM)
+**Remaining action:** Execute the updated SQL in BigQuery Console (or update the scheduled query). Until then, current NULL rates persist. **Workaround:** Use `last_order_id` to join customers ↔ orders.
 
-`tiktok_ads_reports_daily` view reads `campaign_id` and `adgroup_id` from top-level columns (100% NULL) instead of `metrics` JSON (100% filled).
+### BUG 2: TikTok view reads wrong columns (MEDIUM) — FIXED
 
-**Fix:** Change view to `JSON_EXTRACT_SCALAR(metrics, '$.campaign_id')`.
+~~`tiktok_ads_reports_daily` view reads `campaign_id` and `adgroup_id` from top-level columns (100% NULL) instead of `metrics` JSON (100% filled).~~
 
-### BUG 3: Facebook 2024 missing reach/frequency (LOW)
+**Fixed 2026-02-12:** View recreated in BigQuery with `JSON_EXTRACT_SCALAR(metrics, '$.campaign_id')`. Result: **0% → 100% coverage** (30,721 rows). Campaign name joins with `tiktok_campaigns` confirmed working.
+
+### BUG 3: Facebook 2024 missing reach/frequency (LOW) — NOT FIXED
 
 2024 data (42,462 rows) has 100% NULL `reach`, `frequency`, `cpp` because old Airbyte config didn't request these. 2025-2026 data is fine.
 
-**Fix:** Re-sync 2024 with current config (low priority, historical data).
+**Action needed:** Re-sync 2024 with current Airbyte config (low priority, historical data only).
 
 ### 14 always-NULL columns: safe to exclude
 

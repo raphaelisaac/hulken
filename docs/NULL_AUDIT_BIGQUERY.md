@@ -204,20 +204,25 @@ These NULLs are correct and expected. A NULL here means the event didn't happen 
 
 ---
 
-## Action items
+## Action items — status as of 2026-02-12
 
-### URGENT (breaks analytics)
+### FIXED
 
-| # | Bug | Fix | Impact |
-|---|-----|-----|--------|
-| 1 | PII script order-of-operations | Hash first, nullify second | Restores 50-59% of email_hash joins |
-| 2 | TikTok view wrong columns | Read campaign_id/adgroup_id from `metrics` JSON | Enables campaign-level TikTok reporting |
+| # | Bug | Fix applied | Status |
+|---|-----|-------------|--------|
+| 2 | TikTok view wrong columns | `CREATE OR REPLACE VIEW tiktok_ads_reports_daily` — now reads `campaign_id` and `adgroup_id` from `JSON_EXTRACT_SCALAR(metrics, ...)` instead of empty top-level columns | **DONE in BigQuery.** Verified: 0% → 100% coverage (30,721 rows). Campaign name joins with `tiktok_campaigns` confirmed working. |
 
-### LOW PRIORITY
+### FIXED (code) — needs execution
 
-| # | Bug | Fix | Impact |
-|---|-----|-----|--------|
-| 3 | Facebook 2024 reach data | Re-sync 2024 with current Airbyte config | Historical reach/frequency for 2024 |
+| # | Bug | Fix applied | What remains |
+|---|-----|-------------|--------------|
+| 1 | PII hash lost on clean refresh | Updated `scheduled_refresh_clean_tables.sql` to save existing hashes into a temp table before `CREATE OR REPLACE`, then restore via `UPDATE ... SET email_hash = COALESCE(new, saved)` | **SQL file updated, NOT yet executed on BigQuery.** To apply: run the updated scheduled query manually in BigQuery Console, or update the scheduled query definition. After execution, email_hash coverage should go from 41-50% back to ~98%+. |
+
+### REMAINING
+
+| # | Bug | Fix needed | Priority |
+|---|-----|-----------|----------|
+| 3 | Facebook 2024 reach/frequency/cpp 100% NULL | Re-sync 2024 data with current Airbyte config (needs Airbyte historical sync) | LOW — 2025-2026 data is fine, only affects historical 2024 analysis |
 
 ### NO ACTION (safe to remove from `ads_analyst` views)
 
@@ -227,4 +232,4 @@ These 14 fields should be excluded from `ads_analyst` views because they are alw
 
 ---
 
-*Audit based on live BigQuery data as of 2026-02-12.*
+*Audit based on live BigQuery data as of 2026-02-12. Updated after bug fixes applied same day.*
