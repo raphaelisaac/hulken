@@ -55,11 +55,9 @@ Fichier SQL de reference: `scheduled_refresh_clean_tables.sql`
 
 ### Q: "Il manque une table, pourquoi elle n'apparait pas dans le check?"
 **R**: La table `shopify_live_inventory_items` existe mais est **vide** (0 rows).
-Cela signifie que le connecteur Airbyte Shopify ne sync pas les inventory items,
-ou que le scope API du token Shopify ne donne pas acces a cette donnee.
+Le stream `inventory_items` est **desactive** dans Airbyte.
 
-**Action necessaire**: Verifier dans Airbyte que le stream "inventory_items" est active,
-et que le token Shopify a le scope `read_inventory`.
+**Action necessaire**: Activer le stream dans Airbyte si les donnees d'inventaire sont necessaires.
 
 ### Q: "Le sync ne marche pas"
 **R**: Le sync Airbyte Shopify fonctionne - les tables raw sont a jour (derniere extraction:
@@ -71,12 +69,20 @@ automatiquement apres chaque sync Airbyte (toutes les 24h).
 
 ### Q: "Comment se connecter a Airbyte?"
 **R**: Airbyte est installe sur une VM Google Cloud.
-1. Ouvrir un terminal
-2. `ssh airbyte-vm` (ou utiliser la console GCP > Compute Engine > SSH)
-3. L'interface web Airbyte est accessible sur `http://localhost:8000` apres le tunnel SSH
-4. Identifiants: voir le fichier `data_validation/.env` (variables AIRBYTE_*)
 
-Documentation complete: `docs/runbooks/airbyte_operations.md`
+**Windows (PowerShell):**
+```
+gcloud compute ssh instance-20260129-133637 --zone=us-central1-a --tunnel-through-iap --ssh-flag="-L 8000:localhost:8000"
+```
+
+**Mac/Linux:**
+```
+gcloud compute ssh instance-20260129-133637 --zone=us-central1-a --tunnel-through-iap -- -L 8000:localhost:8000
+```
+
+Puis ouvrir http://localhost:8000. Credentials: `abctl local credentials` sur la VM.
+
+Documentation complete: `docs/RUNBOOK.md`
 
 ### Q: "Que faire quand il y a un probleme de sync?"
 **R**: Procedure de diagnostic:
@@ -109,70 +115,44 @@ elles sont remplacees par des hash (first_name_hash, last_name_hash).
 Si deux clients ont le meme prenom (ex: "David"), leur first_name_hash sera identique
 car SHA-256 est deterministe. C'est normal et attendu.
 
-Le prenom en clair (`first_name`) est conserve dans la table customers_clean car il est
-considere comme non-identifiant seul. Le nom de famille est hashe.
+**Note**: Dans le nouveau dataset `ads_analyst`, les colonnes first_name/last_name sont
+retirees des vues car elles sont nullifiees et inutiles sans la valeur originale.
 
-### Q: "Comment changer les noms des tables?"
-**R**: On ne renomme PAS les tables directement (cela casserait les queries existantes).
-A la place, on cree des VUES (views) avec le nom souhaite:
+### Q: "Comment changer les noms des tables?" / "Comment changer les variables (colonnes)?"
+**R**: Un nouveau dataset **`ads_analyst`** sera cree avec des vues propres qui:
+- Ont des noms simples (`shopify_orders` au lieu de `shopify_live_orders_clean`)
+- N'exposent que les colonnes utiles (15 au lieu de 97)
+- Corrigent les formats (order_id numerique au lieu de GID)
+- Unifient les tables dupliquees (1 table orders au lieu de 2)
 
-```sql
--- Exemple: creer un alias plus lisible
-CREATE OR REPLACE VIEW `hulken.ads_data.commandes_shopify` AS
-SELECT * FROM `hulken.ads_data.shopify_live_orders_clean`;
-```
+Voir le plan complet: `docs/SUGGESTIONS_TABLE_CLEANUP.md`
 
-Les vues sont des alias qui ne dupliquent pas les donnees.
-
-### Q: "Comment changer les variables (colonnes) des tables?"
-**R**: On ne modifie pas les colonnes des tables Airbyte (elles sont gerees automatiquement).
-Pour personnaliser les colonnes visibles, on cree une vue:
-
-```sql
--- Exemple: vue simplifiee avec seulement les colonnes utiles
-CREATE OR REPLACE VIEW `hulken.ads_data.orders_simplified` AS
-SELECT
-  id AS order_id,
-  name AS order_number,
-  created_at,
-  total_price,
-  currency,
-  financial_status,
-  fulfillment_status,
-  tags,
-  source_name AS channel
-FROM `hulken.ads_data.shopify_live_orders_clean`;
-```
+L'analyste ouvre `ads_analyst` au lieu de `ads_data` et voit 15 noms clairs au lieu de 40. `ads_data` reste intacte pour Airbyte et les scripts.
 
 ### Q: "Comment relier les tables Shopify entre elles?"
-**R**: Les tables Shopify se joignent via des cles communes. Voici les JOINs principaux:
+**R**: Dans le dataset `ads_analyst`, les tables se joignent directement:
 
 ```sql
 -- Commandes + Details produits par commande
 SELECT o.*, li.*
-FROM `hulken.ads_data.shopify_live_orders_clean` o
-JOIN `hulken.ads_data.shopify_line_items` li ON o.id = li.order_id;
+FROM `hulken.ads_analyst.shopify_orders` o
+JOIN `hulken.ads_analyst.shopify_line_items` li ON o.order_id = li.order_id;
 
--- Commandes + Clients
-SELECT o.*, c.email_hash, c.tags
-FROM `hulken.ads_data.shopify_live_orders_clean` o
-JOIN `hulken.ads_data.shopify_live_customers_clean` c ON o.customer_id = c.id;
+-- Commandes + Clients (via email_hash)
+SELECT o.*, c.tags, c.total_spent
+FROM `hulken.ads_analyst.shopify_orders` o
+JOIN `hulken.ads_analyst.shopify_customers` c ON o.email_hash = c.email_hash;
 
--- Commandes + Attribution UTM
-SELECT o.name AS order_number, o.total_price, u.source, u.medium, u.campaign
-FROM `hulken.ads_data.shopify_live_orders_clean` o
-JOIN `hulken.ads_data.shopify_utm` u ON o.id = u.order_id;
-
--- Commandes + Transactions de paiement
-SELECT o.name, o.total_price, t.gateway, t.kind, t.amount
-FROM `hulken.ads_data.shopify_live_orders_clean` o
-JOIN `hulken.ads_data.shopify_transactions` t ON o.id = t.order_id;
-
--- Commandes + Remboursements
-SELECT o.name, o.total_price, r.created_at AS refund_date
-FROM `hulken.ads_data.shopify_live_orders_clean` o
-JOIN `hulken.ads_data.shopify_refunds` r ON o.id = r.order_id;
+-- Commandes + Attribution UTM (order_id est numerique dans les deux!)
+SELECT o.order_name, o.total_price, u.first_utm_source, u.first_utm_campaign
+FROM `hulken.ads_analyst.shopify_orders` o
+JOIN `hulken.ads_analyst.shopify_utm` u ON o.order_id = u.order_id;
 ```
+
+**Note**: Dans `ads_data`, le join orders ↔ utm ne marche PAS directement car
+`shopify_utm.order_id` est au format GID (`gid://shopify/Order/123456`) alors que
+`shopify_live_orders_clean.id` est numerique (`123456`). Ce probleme est corrige dans
+`ads_analyst` ou les deux sont numeriques.
 
 ### Q: "Pourquoi Google Ads n'est pas efface? Faire de l'ordre dans ads_data"
 **R**: Google Ads n'a JAMAIS ete dans le dataset `ads_data`. Il est dans un dataset separe:
@@ -185,96 +165,48 @@ JOIN `hulken.ads_data.shopify_refunds` r ON o.id = r.order_id;
 | `hulken.analytics_454869667` | GA4 events + pseudonymous_users | ACTIF |
 | `hulken.analytics_454871405` | GA4 events + pseudonymous_users | ACTIF |
 
-**Actions recommandees**:
-1. Supprimer `hulken.google_ads` (vide, doublon avec `google_Ads`)
-2. Pour integrer Google Ads dans les rapports cross-platform, creer des vues dans `ads_data`:
-```sql
-CREATE OR REPLACE VIEW `hulken.ads_data.google_ads_campaign_stats` AS
-SELECT * FROM `hulken.google_Ads.ads_CampaignBasicStats_4354001000`;
-```
+**Action**: Supprimer `hulken.google_ads` (vide, doublon). Google Ads sera accessible via
+la vue `ads_analyst.unified_ads_performance` (cross-platform).
 
 ### Q: "On veut harmoniser les colonnes (index, feature, target) / Unify the indexes"
-**R**: Pour harmoniser les colonnes cross-platform, on cree des vues avec un schema unifie:
+**R**: Une vue `unified_ads_performance` sera creee dans `ads_analyst` qui combine
+Facebook + TikTok + Google Ads avec les memes colonnes:
 
-```sql
--- Exemple: vue unifiee cross-platform avec format index/feature/target
-CREATE OR REPLACE VIEW `hulken.ads_data.unified_ads_performance` AS
+| Colonne | Description |
+|---------|-------------|
+| `date` | Date du rapport |
+| `platform` | facebook / tiktok / google_ads |
+| `campaign_name` | Nom de la campagne |
+| `account_id` | ID du compte publicitaire |
+| `spend` | Depenses en USD |
+| `impressions` | Nombre d'affichages |
+| `clicks` | Nombre de clics |
 
--- Facebook
-SELECT
-  DATE(date_start) AS date_index,           -- INDEX
-  'facebook' AS platform,                    -- FEATURE
-  campaign_name,                             -- FEATURE
-  account_id,                                -- FEATURE
-  CAST(spend AS FLOAT64) AS spend,          -- TARGET
-  CAST(impressions AS INT64) AS impressions, -- TARGET
-  CAST(clicks AS INT64) AS clicks           -- TARGET
-FROM `hulken.ads_data.facebook_insights`
-
-UNION ALL
-
--- TikTok
-SELECT
-  report_date AS date_index,
-  'tiktok' AS platform,
-  campaign_name,
-  CAST(advertiser_id AS STRING) AS account_id,
-  spend,
-  impressions,
-  clicks
-FROM `hulken.ads_data.tiktok_campaigns_reports_daily`
-
-UNION ALL
-
--- Google Ads (depuis google_Ads dataset)
-SELECT
-  _DATA_DATE AS date_index,
-  'google_ads' AS platform,
-  CampaignName AS campaign_name,
-  CAST(ExternalCustomerId AS STRING) AS account_id,
-  Cost / 1000000.0 AS spend,
-  Impressions AS impressions,
-  Clicks AS clicks
-FROM `hulken.google_Ads.ads_CampaignBasicStats_4354001000`;
-```
-
-Cette vue permet de comparer les 3 plateformes avec les memes colonnes.
+L'analyste peut comparer les 3 plateformes dans une seule requete.
 
 ### Q: "Conversion rate in Facebook"
-**R**: Le taux de conversion Facebook se calcule ainsi:
+**R**: Le taux de conversion Facebook se calcule via `ads_analyst.facebook_insights`:
 
 ```sql
--- Conversion rate par campagne (derniers 30 jours)
 SELECT
   campaign_name,
   SUM(CAST(impressions AS INT64)) AS impressions,
   SUM(CAST(clicks AS INT64)) AS clicks,
   SUM(CAST(spend AS FLOAT64)) AS spend,
-  SUM(CAST(actions_value AS FLOAT64)) AS revenue,
   -- CTR (Click-Through Rate)
   SAFE_DIVIDE(SUM(CAST(clicks AS INT64)), SUM(CAST(impressions AS INT64))) * 100 AS ctr_pct,
   -- CPC (Cost Per Click)
-  SAFE_DIVIDE(SUM(CAST(spend AS FLOAT64)), SUM(CAST(clicks AS INT64))) AS cpc,
-  -- ROAS (Return On Ad Spend)
-  SAFE_DIVIDE(SUM(CAST(actions_value AS FLOAT64)), SUM(CAST(spend AS FLOAT64))) AS roas
-FROM `hulken.ads_data.facebook_insights`
+  SAFE_DIVIDE(SUM(CAST(spend AS FLOAT64)), SUM(CAST(clicks AS INT64))) AS cpc
+FROM `hulken.ads_analyst.facebook_insights`
 WHERE DATE(date_start) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
 GROUP BY campaign_name
 ORDER BY spend DESC;
 ```
 
-Pour le taux de conversion par action specifique (achats, leads, etc.):
-```sql
-SELECT
-  campaign_name,
-  action_type,
-  SUM(CAST(value AS FLOAT64)) AS conversions
-FROM `hulken.ads_data.facebook_insights_action_type`
-WHERE action_type IN ('purchase', 'lead', 'complete_registration')
-  AND DATE(date_start) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-GROUP BY campaign_name, action_type
-ORDER BY conversions DESC;
-```
+**Note**: Les vues `facebook_insights_action_type`, `facebook_insights_dma` et
+`facebook_insights_platform_device` ne sont pas encore creees dans BigQuery.
+Les tables raw Airbyte correspondantes (`facebook_ads_insights_dma`, etc.) sont en cours
+de sync (Job 150). Ces vues seront creees apres la fin du sync.
 
 ### Q: "Why tags in shopify_live_customers?"
 **R**: Les tags sont des etiquettes ajoutees manuellement ou automatiquement dans Shopify Admin.
@@ -290,12 +222,7 @@ Ils permettent de segmenter les clients. Voici les tags les plus frequents dans 
 | `Notch Conversation` | 119 | Contact via outil support Notch |
 | `newsletter` | 41 | Inscrits newsletter |
 
-Ces tags sont **utiles** pour la segmentation et l'analyse - ne pas les supprimer.
-Pour filtrer par tag en SQL:
-```sql
-SELECT * FROM `hulken.ads_data.shopify_live_customers_clean`
-WHERE tags LIKE '%Gold VIP%';
-```
+Ces tags sont **utiles** pour la segmentation - disponibles dans `ads_analyst.shopify_customers`.
 
 ### Q: "Pourquoi il me deconnecte, je veux rester connecte sur VSCode?"
 **R**: La deconnexion BigQuery dans VSCode est causee par l'expiration du token d'authentification.
@@ -309,11 +236,6 @@ Solutions:
 2. **Si vous utilisez `gcloud auth`**:
    - Relancer `gcloud auth application-default login` quand ca expire
    - Ou ajouter dans votre terminal: `export GOOGLE_APPLICATION_CREDENTIALS="D:/Better_signal/hulken-fb56a345ac08.json"`
-
-3. **Extension VSCode BigQuery** (si elle se deconnecte):
-   - Preferences > Settings > chercher "BigQuery"
-   - Configurer le chemin vers le service account JSON
-   - Desactiver "Use Application Default Credentials" et pointer vers le JSON
 
 ### Q: "Impossible d'ouvrir les routines"
 **R**: Les "routines" dans BigQuery sont des stored procedures ou scheduled queries.
@@ -359,12 +281,6 @@ Pour ajouter une nouvelle table au check:
 2. Ajouter la table dans la liste des tables verifiees
 3. Definir les seuils de qualite dans `data_validation/config.py`
 
-Le script `reconciliation_check.py` verifie deja toutes les tables Shopify pour:
-- Doublons (duplicate detection)
-- Fraicheur des donnees (freshness)
-- Champs PII (compliance audit)
-- Continuite temporelle
-
 Pour les NOUVELLES sources (ex: Google Ads, Klaviyo), il faudra ajouter des checks specifiques.
 
 ### Q: "Beaucoup de champs sont vides sans raison"
@@ -376,18 +292,21 @@ Pour les NOUVELLES sources (ex: Google Ads, Klaviyo), il faudra ajouter des chec
 3. **Champs optionnels** (note, po_number, company, etc.): Pas tous les clients remplissent
    ces champs. C'est le comportement normal de Shopify.
 
+**Solution**: Le dataset `ads_analyst` retire toutes les colonnes toujours vides. Plus de confusion.
+
 ### Q: "Il faut supprimer ce qu'on n'utilise pas"
-**R**: Tables candidates a la suppression ou archivage:
+**R**: Plutot que supprimer (ce qui casserait Airbyte et les scripts), la solution est le dataset
+`ads_analyst` qui ne montre que les 15 vues utiles. Les 40 tables de `ads_data` restent
+en arriere-plan pour le pipeline mais l'analyste ne les voit plus.
 
-| Table | Rows | Recommendation |
-|-------|------|----------------|
-| `shopify_live_inventory_items` | 0 | Supprimer (vide, inutile) |
-| `shopify_orders` | 585,927 | Archiver (import historique, remplace par live_orders) |
-| `shopify_line_items` | 719,124 | Garder si analyse produit necessaire |
-| `shopify_utm` | 594,988 | Garder (attribution cross-platform) |
+| Avant | Apres |
+|-------|-------|
+| L'analyste ouvre `ads_data` et voit 40 noms | L'analyste ouvre `ads_analyst` et voit 15 noms |
+| Tables avec 97 colonnes (30+ NULL) | Vues avec 10-15 colonnes utiles |
+| 2 tables orders incompatibles | 1 vue unifiee `shopify_orders` |
+| join utm ↔ orders casse (format GID) | join direct (order_id numerique) |
 
-**Attention**: Ne PAS supprimer les tables raw Airbyte (`shopify_live_*`).
-Elles sont necessaires pour le sync incremental.
+Plan complet: `docs/SUGGESTIONS_TABLE_CLEANUP.md`
 
 ---
 
@@ -412,35 +331,32 @@ python data_validation/live_reconciliation.py --tolerance 5
 python data_validation/live_reconciliation.py --no-animation
 ```
 
-Nouvelles fonctionnalites:
-- Dates personnalisables (`--start-date`, `--end-date`)
-- Exclut les 2 derniers jours par defaut (attribution window)
-- Affiche la fraicheur des donnees BQ (heures depuis le dernier sync)
-- Skip les comptes sans activite (ex: Canada) au lieu de faux MATCH
-- Tolerance ajustable (`--tolerance`)
-
 ---
 
 ## Tables a utiliser (pour les analystes)
 
-**IMPORTANT**: Ne jamais interroger les tables raw directement. Utiliser ces vues/tables propres:
+**IMPORTANT**: Utiliser le dataset **`ads_analyst`** (pas `ads_data`).
 
-| Plateforme | Table/Vue propre | Description |
-|------------|-----------------|-------------|
-| **Facebook** | `facebook_insights` | Metriques ads dedupliquees |
-| **Facebook** | `facebook_insights_action_type` | Breakdown par type d'action |
-| **Facebook** | `facebook_insights_dma` | Breakdown par zone geo (DMA) |
-| **Facebook** | `facebook_insights_platform_device` | Breakdown par plateforme/device |
-| **TikTok** | `tiktok_ads_reports_daily` | Metriques ads dedupliquees |
-| **TikTok** | `tiktok_campaigns_reports_daily` | Metriques par campagne |
-| **TikTok** | `tiktok_ad_groups_reports_daily` | Metriques par ad group |
-| **Shopify** | `shopify_live_orders_clean` | Commandes dedupliquees + PII hashe |
-| **Shopify** | `shopify_live_customers_clean` | Clients dedupliques + PII hashe |
-| **Shopify** | `shopify_products` | Catalogue produits (55 produits) |
-| **Shopify** | `shopify_transactions` | Transactions de paiement |
-| **Shopify** | `shopify_refunds` | Remboursements |
-| **Shopify** | `shopify_utm` | Attribution UTM cross-platform |
+| Plateforme | Table dans `ads_analyst` | Description |
+|------------|------------------------|-------------|
+| **Facebook** | `facebook_insights` | Metriques ads dedupliquees (campaign_name, ad_name inclus) |
+| **Facebook** | `facebook_campaigns_daily` | Metriques aggregees par campagne/jour |
+| **Facebook** | `facebook_insights_country` | Breakdown par pays |
+| **Facebook** | `facebook_insights_age_gender` | Breakdown par age + genre |
+| **TikTok** | `tiktok_reports_daily` | Metriques ads dedupliquees |
+| **TikTok** | `tiktok_campaigns_daily` | Metriques par campagne |
+| **TikTok** | `tiktok_campaigns` | Noms des campagnes (pour joins) |
+| **Shopify** | `shopify_orders` | Commandes unifiees (historique + live, dedupliquees, 15 colonnes) |
+| **Shopify** | `shopify_customers` | Clients (dedupliques, PII hashe, 10 colonnes) |
+| **Shopify** | `shopify_utm` | Attribution UTM (order_id numerique, joinable) |
+| **Shopify** | `shopify_products` | Catalogue produits |
 | **Shopify** | `shopify_line_items` | Detail des items par commande |
+| **Cross-platform** | `unified_ads_performance` | Facebook + TikTok + Google Ads unifies |
+
+**Vues Facebook en attente** (seront creees apres fin du sync Job 150):
+- `facebook_insights_action_type` - Breakdown par type d'action (purchase, lead, etc.)
+- `facebook_insights_dma` - Breakdown par zone geo (DMA)
+- `facebook_insights_platform_device` - Breakdown par plateforme/device
 
 ---
 
@@ -508,9 +424,6 @@ Mix de modes:
 - Dimension: `tiktokads`, `tiktokad_groups`, `tiktokcampaigns` (Full Refresh | Overwrite - pas de doublons)
 - Reports: `tiktokads_reports_daily`, `tiktokad_groups_reports_daily`, `tiktokcampaigns_reports_daily`, `tiktokadvertisers_reports_daily` (Incremental | Append - doublons mitiges par vues dedup)
 
-### Google Ads - Localisation (reponse client x3)
-Google Ads n'est PAS dans `ads_data` mais dans un dataset separe `hulken.google_Ads` (96 tables + 96 vues, Data Transfer Service, account 4354001000). Le dataset `hulken.google_ads` (minuscule) est VIDE et peut etre supprime.
-
 ---
 
 ## Actions a faire
@@ -526,8 +439,10 @@ Google Ads n'est PAS dans `ads_data` mais dans un dataset separe `hulken.google_
 9. [ ] **Creer un scheduled query BQ** pour rafraichir les _clean quotidiennement
    - SQL pret dans `scheduled_refresh_clean_tables.sql`
    - BigQuery Console > Scheduled Queries > Daily 10:00 UTC
-10. [ ] **Supprimer** `hulken.google_ads` (dataset vide, doublon)
-11. [ ] **Supprimer** `shopify_live_inventory_items` (table vide, stream desactive)
-12. [ ] **Archiver** `shopify_orders` si le live_orders suffit
-13. [ ] **Optionnel**: Activer le stream `inventory_items` dans Airbyte si besoin
-14. [ ] **Optionnel**: Creer vue unifiee cross-platform (Facebook + TikTok + Google Ads)
+10. [ ] **Creer le dataset `ads_analyst`** avec 15 vues propres
+    - Plan complet: `docs/SUGGESTIONS_TABLE_CLEANUP.md`
+11. [ ] **Creer les vues Facebook manquantes** (action_type, dma, platform_device)
+    - Attendre la fin du sync Job 150
+    - SQL dans `create_facebook_dedup_views.sql`
+12. [ ] **Supprimer** `hulken.google_ads` (dataset vide, doublon)
+13. [ ] **Supprimer** vue `shopify_live_inventory_items` (vide, stream desactive)

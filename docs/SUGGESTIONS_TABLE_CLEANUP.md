@@ -1,87 +1,220 @@
-# BigQuery Table Cleanup Suggestions
+# BigQuery Cleanup: Less Tables, Same Data
 
 **Date:** 2026-02-12
 **Dataset:** `hulken.ads_data`
-**Current state:** 38 tables/views, ~5.3 GB total
+**Source:** Analysis of `Hulken Shopify MetaData.txt` + BigQuery audit
 
 ---
 
-## 1. Why are there two Shopify orders tables?
+## The problem
 
-| Table | Source | Period | Rows | How it got there |
-|-------|--------|--------|------|------------------|
-| `shopify_orders` | One-time bulk JSONL import | Sep 2021 - Jan 29 2026 | 585,927 | Manual upload |
-| `shopify_live_orders_clean` | Airbyte live sync (ongoing) | May 2022 - today | 16,983 | Automatic daily |
-
-- **8,114 orders exist in BOTH tables** (overlap from May 2022 to Jan 29)
-- **8,869 orders exist only in live** (after Jan 29 - the bulk import cutoff)
-- The two tables have **different column names** (`totalPrice` vs `total_price`, `createdAt` vs `created_at`)
-
-**Suggestion:** Create a unified view `shopify_all_orders` that combines both tables with common columns and deduplicates by ID. Analysts use one table instead of guessing which one to pick.
+The analyst opens BigQuery and sees **40 names** with raw tables, clean tables, dedup views, lookup tables mixed together. Tables have 97 columns where 30+ are always NULL. The `order_id` format differs between tables. Two orders tables exist with different column names for the same data.
 
 ---
 
-## 2. TikTok: 4 redundant daily report tables
+## Why we can't move tables
 
-All four tables cover the same period (Jun 2022 - today) with the same spend total (~$2.6M):
-
-| Table | Rows | Spend | Level | Needed? |
-|-------|------|-------|-------|---------|
-| `tiktokadvertisers_reports_daily` | 2,680 | $2,628,325 | Whole account (1 row/day) | No |
-| `tiktokcampaigns_reports_daily` | 11,692 | $2,628,313 | Per campaign | Yes |
-| `tiktokad_groups_reports_daily` | 13,519 | $2,628,299 | Per ad group | Maybe |
-| `tiktokads_reports_daily` | 61,854 | $1,697,530 | Per individual ad | Yes |
-
-The advertiser-level table is just one number per day - useless when you already have campaigns. The ad group level is rarely used in reports.
-
-**Suggestion:** Disable `tiktokadvertisers_reports_daily` and `tiktokad_groups_reports_daily` in Airbyte. Keep `tiktokcampaigns_reports_daily` (campaign analysis) and `tiktokads_reports_daily` (ad-level detail).
-
-**Impact:** -16K rows synced daily, faster sync times.
+Moving raw tables to another dataset would break Airbyte (3 connections), PII hash scheduled queries (90+ references), clean table refresh, 16 views, and Python scripts. Too risky.
 
 ---
 
-## 3. Facebook metadata tables: check if used
+## Safe solution: new dataset `ads_analyst`
 
-| Table | Rows | Size | Contains |
-|-------|------|------|----------|
-| `facebook_ad_creatives` | 5,160 | 13.3 MB | Ad images, videos, links, titles |
-| `facebook_ads` | 5,428 | 7.2 MB | Ad names, statuses, IDs |
-| `facebook_ad_sets` | 341 | 0.2 MB | Ad set names, budgets, targeting |
-
-These are metadata/catalog tables. `facebook_insights` already contains `campaign_name` and `ad_name` directly, so joins to these tables are not needed for standard reporting.
-
-**Suggestion:** If nobody queries these tables (check with the team), disable them in Airbyte. If creative analysis is planned (which image/video performs best), keep `facebook_ad_creatives`.
-
-**Impact:** -11K rows, -20 MB, faster Facebook sync.
+Create a NEW dataset `ads_analyst` with **14 smart views** that:
+- Only expose useful, populated columns (not 97)
+- Fix format differences (GID order IDs → numeric)
+- Unify duplicate tables (2 orders tables → 1)
+- Remove always-NULL columns
+- `ads_data` stays 100% untouched
 
 ---
 
-## 4. Shopify transactions: heavy and possibly unused
+## The 14 views
 
-| Table | Rows | Size |
-|-------|------|------|
-| `shopify_live_transactions` | 59,041 | 174.5 MB |
+### shopify_orders (unified, from 2 tables)
 
-This is the 3rd heaviest table. It contains payment transaction details (gateway, amount, authorization codes). If the only need is "was the order paid?", that info is already in `shopify_live_orders_clean` (financial status field).
+Currently `shopify_orders` (bulk, 586K rows, `totalPrice`/`createdAt`) and `shopify_live_orders_clean` (Airbyte, 17K rows, `total_price`/`created_at`) overlap with 8K shared orders and different column names. The unified view combines both, deduplicates on ID (live wins), and exposes only useful columns.
 
-**Suggestion:** Verify if anyone uses this table. If not, disable in Airbyte.
+**97 columns → 15 columns:**
 
-**Impact:** -174 MB, significantly faster Shopify sync.
+| Column | Source | Why keep |
+|--------|--------|----------|
+| `order_id` | `id` | Numeric ID for joins |
+| `order_name` | `name` | Display name (#583346) |
+| `created_at` | `created_at` / `createdAt` | Order date |
+| `total_price` | `total_price` / `totalPrice` | Revenue |
+| `subtotal_price` | `subtotal_price` / `subtotalPrice` | Before tax |
+| `total_discounts` | `total_discounts` / `totalDiscounts` | Discounts applied |
+| `total_tax` | `total_tax` / `totalTax` | Tax amount |
+| `currency` | `currency` / `currencyCode` | USD/CAD/EUR |
+| `financial_status` | `financial_status` / `displayFinancialStatus` | paid/refunded/pending |
+| `fulfillment_status` | `fulfillment_status` / `displayFulfillmentStatus` | fulfilled/unfulfilled |
+| `source_name` | `source_name` | web/pos/api |
+| `tags` | `tags` | Amazon, nofraud_skip, etc. |
+| `email_hash` | `email_hash` | For customer matching |
+| `shipping_country` | from `shipping_address` JSON / `shipping_country` | Country |
+| `cancelled_at` | `cancelled_at` | NULL if not cancelled |
+
+**Removed:** `company` (always NULL), `po_number` (always NULL), `device_id` (always NULL), `deleted_at` (always NULL), `payment_terms` (always NULL), 30+ JSON blobs (`line_items`, `customer`, `refunds`, `fulfillments`, `tax_lines`, etc.), 20+ `_set` duplicate columns, all `_airbyte_*` internal columns.
+
+### shopify_customers (from shopify_live_customers_clean)
+
+**28 columns → 10 columns:**
+
+| Column | Why keep |
+|--------|----------|
+| `customer_id` | Numeric ID |
+| `created_at` | Sign-up date |
+| `orders_count` | Number of orders (note: may show 0 for old customers) |
+| `total_spent` | Lifetime value (note: may show 0 for old customers) |
+| `currency` | Customer currency |
+| `state` | enabled/disabled |
+| `tags` | Customer tags |
+| `email_hash` | For matching with orders |
+| `last_order_id` | Most recent order |
+| `last_order_name` | Most recent order display name |
+
+**Removed:** `first_name` (nullified by PII script), `first_name_hash` (only 90/23K filled), `last_name_hash` (same issue), `addresses_hash`, `default_address_hash`, `phone_hash`, `note` (always empty), `accepts_marketing` (always NULL), `admin_graphql_api_id`, `multipass_identifier`, `marketing_opt_in_level`, `tax_exempt`, `tax_exemptions`, `shop_url`, `sms_marketing_consent`, `email_marketing_consent`, all `_airbyte_*` columns.
+
+### shopify_utm (from shopify_utm, with fixed order_id)
+
+**Fix:** `order_id` currently contains GID format `gid://shopify/Order/6688369770751`. The view extracts the numeric ID so it can be joined directly to `shopify_orders.order_id` without REGEXP.
+
+| Column | Change |
+|--------|--------|
+| `order_id` | Extracted numeric from GID (`6688369770751` instead of `gid://shopify/Order/6688369770751`) |
+| `order_name` | Keep as-is |
+| `created_at` | Keep |
+| `total_price` | Keep |
+| `customer_order_index` | Keep (1 = first order = new customer) |
+| `days_to_conversion` | Keep |
+| `first_utm_source` | Keep |
+| `first_utm_medium` | Keep |
+| `first_utm_campaign` | Keep |
+| `first_utm_content` | Keep |
+| `first_landing_page` | Keep |
+| `last_utm_source` | Keep |
+| `last_utm_medium` | Keep |
+| `last_utm_campaign` | Keep |
+| `sales_channel` | Keep |
+| `attribution_status` | Keep |
+
+### shopify_products (from ads_data.shopify_products view)
+
+Keep as-is. Already deduplicated.
+
+### shopify_line_items (from ads_data.shopify_line_items)
+
+Keep as-is. Contains order line items (which products in each order).
+
+### facebook_insights (from ads_data.facebook_insights view)
+
+Keep as-is. Already deduplicated. Already has `campaign_name`, `ad_name`, `adset_name`, `account_name` built-in — no need for the separate `facebook_ads`, `facebook_ad_sets`, `facebook_ad_creatives` lookup tables.
+
+### facebook_campaigns_daily (from ads_data.facebook_campaigns_daily view)
+
+Keep as-is. Aggregated by campaign/day.
+
+### facebook_insights_country (from ads_data.facebook_insights_country view)
+
+Keep as-is.
+
+### facebook_insights_age_gender (from ads_data.facebook_insights_age_gender view)
+
+Keep as-is.
+
+### tiktok_reports_daily (from ads_data.tiktok_ads_reports_daily view)
+
+Keep as-is. Already extracts clean columns from JSON.
+
+### tiktok_campaigns_daily (from ads_data.tiktok_campaigns_reports_daily view)
+
+Keep as-is.
+
+### tiktok_campaigns (from ads_data.tiktok_campaigns view)
+
+Keep as-is. Needed for campaign name lookups.
 
 ---
 
-## Summary
+## Analyst questions answered
 
-| Priority | Action | Tables | Impact |
-|----------|--------|--------|--------|
-| High | Create unified Shopify view | `shopify_orders` + `shopify_live_orders_clean` | Simpler for analysts |
-| High | Disable in Airbyte | `tiktokadvertisers_reports_daily` | -2.7K useless rows |
-| Medium | Disable in Airbyte | `tiktokad_groups_reports_daily` | -13.5K rows, faster sync |
-| Medium | Check usage, then disable | `shopify_live_transactions` | -174 MB |
-| Low | Check usage, then disable | `facebook_ad_creatives`, `facebook_ads`, `facebook_ad_sets` | -20 MB |
+From `Hulken Shopify MetaData.txt`:
 
-**Total potential savings:** ~200 MB storage, ~32K fewer rows synced daily, faster Airbyte sync times.
+| Question | Answer |
+|----------|--------|
+| "What is the difference with shopify_orders?" | Bulk import (historical, 586K) vs Airbyte live sync (17K). Solved by unified view. |
+| "first_name: should not be encrypted" | The PII hash script nullified it. In `ads_analyst`, first_name is removed entirely (not useful without the actual name). |
+| "orders_count: why at 0" | Airbyte Shopify connector returns 0 for customers outside the sync window. Known limitation. |
+| "total_spent: why is there 0?" | Same reason — Shopify API returns 0 for old/inactive customers. |
+| "email: why null?" | PII script nullified emails after hashing. Use `email_hash` for matching. |
+| "accepts_marketing: why null?" | 0/23K filled. Shopify API doesn't return this field for the connector used. Removed from view. |
+| "note: why null?" | 0/23K filled for customers, 52/42K for orders. Removed from view. |
+| "order_id looks like customer_id" (refunds) | Shopify uses same numeric format for all IDs. The refunds table is rarely needed — kept in `ads_data` only. |
+| "order_id: gid://shopify/Order/..." (utm) | Fixed in `ads_analyst` view: extracts numeric ID for easy joins. |
 
 ---
 
-*No action taken - suggestions only. Confirm before implementing.*
+## Before vs After
+
+```
+BEFORE (ads_data)                      AFTER (ads_analyst)
+40 names, 97-column tables             14 names, 10-15 columns each
+
+facebook_ad_creatives          |       facebook_insights
+facebook_ad_sets               |       facebook_campaigns_daily
+facebook_ads                   |       facebook_insights_country
+facebook_ads_insights          |       facebook_insights_age_gender
+facebook_ads_insights_age...   |
+facebook_ads_insights_cou...   |       tiktok_reports_daily
+facebook_ads_insights_reg...   |       tiktok_campaigns_daily
+facebook_campaigns_daily       |       tiktok_campaigns
+facebook_insights              |
+facebook_insights_age_gender   |       shopify_orders (unified!)
+facebook_insights_country      |       shopify_customers
+facebook_insights_region       |       shopify_utm (fixed order_id!)
+tiktokads                      |       shopify_products
+tiktokads_reports_daily        |       shopify_line_items
+tiktokad_groups                |
+tiktokad_groups_reports_daily  |
+tiktokcampaigns                |       + google_Ads (own dataset)
+tiktokcampaigns_reports_daily  |       + analytics_* (own datasets)
+tiktokadvertisers_reports...   |
+shopify_line_items             |
+shopify_live_customers         |
+shopify_live_customers_clean   |
+shopify_live_inventory_items   |
+shopify_live_order_refunds     |
+shopify_live_orders            |
+shopify_live_orders_clean      |
+shopify_live_products          |
+shopify_live_transactions      |
+shopify_orders                 |
+shopify_products               |
+shopify_refunds                |
+shopify_transactions           |
+shopify_utm                    |
+tiktok_ad_groups               |
+tiktok_ad_groups_reports_daily |
+tiktok_ads                     |
+tiktok_ads_reports_daily       |
+tiktok_advertisers_reports...  |
+tiktok_campaigns               |
+tiktok_campaigns_reports_daily |
+```
+
+## What breaks?
+
+**Nothing.** `ads_data` stays 100% untouched.
+
+| Component | Impact |
+|-----------|--------|
+| Airbyte (3 connections) | No change |
+| PII hash scheduled queries | No change |
+| Clean table refresh | No change |
+| Python scripts | No change |
+| Existing views in ads_data | No change |
+
+---
+
+*Suggestions only. No changes made. Confirm before implementing.*
