@@ -181,16 +181,38 @@ Date        Platform         Spend      Revenue    Orders  ROAS
 
 ---
 
-## Known issue: PII pipeline bug
+## Known bugs found during NULL audit
 
-**URGENT.** The PII hash scheduled query nullifies `email` BEFORE hashing for some customers. Result: `email_hash` is NULL for those customers, making cross-table matching impossible (orders ↔ customers ↔ UTM).
+Full audit: **[NULL_AUDIT_BIGQUERY.md](NULL_AUDIT_BIGQUERY.md)** — every NULL column classified as bug / API design / expected.
 
-- **Impact:** ~30% of customers in `shopify_live_customers_clean` have NULL `email_hash`
-- **Cause:** The PII script runs `SET email = NULL` before the hash step completes for all rows
-- **Fix needed:** Modify the scheduled query to hash first, nullify second
-- **Workaround:** Use `last_order_id` to join customers ↔ orders instead of `email_hash`
+### BUG 1: PII script wiped emails BEFORE hashing (CRITICAL)
 
-This is independent of the `ads_analyst` dataset but should be fixed to make the views fully useful.
+The PII scheduled query runs `SET email = NULL` before the hash step completes. Result:
+
+| Table | `email_hash` NULL rate | Expected |
+|-------|----------------------|----------|
+| `shopify_live_customers_clean` | **59% NULL** (14,026/23,624) | ~0% |
+| `shopify_live_orders_clean` | **50.5% NULL** (8,589/17,021) | ~2% |
+
+Also: `first_name_hash`, `last_name_hash`, `phone_hash` are 99.5% NULL in customers_clean.
+
+**Fix:** Hash first, nullify second. **Workaround:** Use `last_order_id` to join customers ↔ orders.
+
+### BUG 2: TikTok view reads wrong columns (MEDIUM)
+
+`tiktok_ads_reports_daily` view reads `campaign_id` and `adgroup_id` from top-level columns (100% NULL) instead of `metrics` JSON (100% filled).
+
+**Fix:** Change view to `JSON_EXTRACT_SCALAR(metrics, '$.campaign_id')`.
+
+### BUG 3: Facebook 2024 missing reach/frequency (LOW)
+
+2024 data (42,462 rows) has 100% NULL `reach`, `frequency`, `cpp` because old Airbyte config didn't request these. 2025-2026 data is fine.
+
+**Fix:** Re-sync 2024 with current config (low priority, historical data).
+
+### 14 always-NULL columns: safe to exclude
+
+These are NULL because the **API never sends them** (not a bug): `company`, `po_number`, `device_id`, `deleted_at`, `payment_terms`, `landing_site_ref`, `accepts_marketing`, `multipass_identifier`, `marketing_opt_in_level`, `message` (transactions), `device_id`/`user_id`/`location_id` (transactions), `advertiser_id` (TikTok).
 
 ---
 
