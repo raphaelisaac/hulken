@@ -4,6 +4,13 @@
 -- Run daily after Airbyte sync (recommended: 10:00 UTC, after 09:00 sync)
 -- Creates deduplicated + PII-hashed versions of raw Airbyte tables.
 --
+-- FIX 2026-02-12: Preserves existing hashes when raw emails are NULL.
+-- The PII nullify script wipes emails from raw tables, but Airbyte
+-- re-syncs with fresh emails. This script now:
+--   1. Saves existing hashes from the current clean table
+--   2. Rebuilds the clean table (dedup + hash any available emails)
+--   3. Restores preserved hashes for rows where email was already NULL
+--
 -- Setup in BigQuery Console:
 --   1. Go to BigQuery > Scheduled Queries > Create
 --   2. Paste each query below as a separate scheduled query
@@ -19,7 +26,15 @@
 -- ============================================================
 -- Deduplicates on order ID (keeps latest extraction)
 -- Hashes PII fields (email, phone) and removes raw PII columns
+-- Preserves existing hashes when raw email has been nullified
 
+-- Step 1a: Save existing hashes before replacing the table
+CREATE TEMP TABLE _prev_orders_hashes AS
+SELECT id, email_hash, phone_hash
+FROM `hulken.ads_data.shopify_live_orders_clean`
+WHERE email_hash IS NOT NULL OR phone_hash IS NOT NULL;
+
+-- Step 1b: Rebuild clean table with dedup + hash
 CREATE OR REPLACE TABLE `hulken.ads_data.shopify_live_orders_clean` AS
 SELECT * EXCEPT(rn, email, phone, billing_address, shipping_address, contact_email),
   CASE WHEN email IS NOT NULL AND email != ''
@@ -33,13 +48,34 @@ FROM (
 )
 WHERE rn = 1;
 
+-- Step 1c: Restore hashes for rows where raw email was already nullified
+UPDATE `hulken.ads_data.shopify_live_orders_clean` AS c
+SET
+  c.email_hash = COALESCE(c.email_hash, p.email_hash),
+  c.phone_hash = COALESCE(c.phone_hash, p.phone_hash)
+FROM _prev_orders_hashes AS p
+WHERE c.id = p.id
+  AND (c.email_hash IS NULL OR c.phone_hash IS NULL);
+
+DROP TABLE _prev_orders_hashes;
+
 
 -- ============================================================
 -- QUERY 2: Refresh shopify_live_customers_clean
 -- ============================================================
 -- Deduplicates on customer ID (keeps latest extraction)
 -- Hashes PII fields, keeps first_name in clear (non-identifying alone)
+-- Preserves existing hashes when raw PII has been nullified
 
+-- Step 2a: Save existing hashes
+CREATE TEMP TABLE _prev_customers_hashes AS
+SELECT id, email_hash, phone_hash, last_name_hash, addresses_hash,
+       default_address_hash, first_name_hash
+FROM `hulken.ads_data.shopify_live_customers_clean`
+WHERE email_hash IS NOT NULL OR phone_hash IS NOT NULL
+   OR last_name_hash IS NOT NULL OR first_name_hash IS NOT NULL;
+
+-- Step 2b: Rebuild clean table
 CREATE OR REPLACE TABLE `hulken.ads_data.shopify_live_customers_clean` AS
 SELECT * EXCEPT(rn, email, phone, first_name, last_name, addresses, default_address),
   first_name,
@@ -61,6 +97,22 @@ FROM (
   FROM `hulken.ads_data.shopify_live_customers`
 )
 WHERE rn = 1;
+
+-- Step 2c: Restore hashes for rows where raw PII was already nullified
+UPDATE `hulken.ads_data.shopify_live_customers_clean` AS c
+SET
+  c.email_hash = COALESCE(c.email_hash, p.email_hash),
+  c.phone_hash = COALESCE(c.phone_hash, p.phone_hash),
+  c.last_name_hash = COALESCE(c.last_name_hash, p.last_name_hash),
+  c.addresses_hash = COALESCE(c.addresses_hash, p.addresses_hash),
+  c.default_address_hash = COALESCE(c.default_address_hash, p.default_address_hash),
+  c.first_name_hash = COALESCE(c.first_name_hash, p.first_name_hash)
+FROM _prev_customers_hashes AS p
+WHERE c.id = p.id
+  AND (c.email_hash IS NULL OR c.phone_hash IS NULL
+    OR c.last_name_hash IS NULL OR c.first_name_hash IS NULL);
+
+DROP TABLE _prev_customers_hashes;
 
 
 -- ============================================================
