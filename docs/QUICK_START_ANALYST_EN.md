@@ -15,33 +15,42 @@
    |            live_reconciliation.py           |
    |  ----------------------------------------> |
    |                                             |
-   |            [1/8] Connect to BigQuery        |
+   |            [1/11] Connect to BigQuery       |
    |            Checks database is reachable     |
    |            Shows last sync time per source  |
    |                                             |
-   |            [2/8] Call Facebook API           |
+   |            [2/11] Call Facebook API          |
    |            Gets real spend/clicks/views     |
    |            from Facebook directly           |
    |                                             |
-   |            [3/8] Query Facebook in BigQuery  |
+   |            [3/11] Query Facebook in BigQuery |
    |            Gets same metrics from our DB    |
    |                                             |
-   |            [4/8] Compare Facebook            |
+   |            [4/11] Compare Facebook           |
    |  <-------- Shows side-by-side:              |
    |            API value vs DB value             |
    |            + MATCH or MISMATCH              |
    |                                             |
-   |            [5/8] Call TikTok API             |
+   |            [5/11] Call TikTok API            |
    |            Same thing for TikTok            |
    |                                             |
-   |            [6/8] Query TikTok in BigQuery    |
+   |            [6/11] Query TikTok in BigQuery   |
    |                                             |
-   |            [7/8] Compare TikTok              |
+   |            [7/11] Compare TikTok             |
    |  <-------- API vs DB side-by-side           |
    |                                             |
-   |            [8/8] SCOREBOARD                  |
+   |            [8/11] Call Shopify API            |
+   |            Gets order count + revenue       |
+   |            from Shopify directly             |
+   |                                             |
+   |            [9/11] Query Shopify in BigQuery   |
+   |                                             |
+   |            [10/11] Compare Shopify            |
+   |  <-------- Order count + revenue comparison |
+   |                                             |
+   |            [11/11] SCOREBOARD                |
    |  <======== Final result:                    |
-   |            "6/6 MATCH" = ALL GOOD           |
+   |            "8/8 MATCH" = ALL GOOD           |
    |            or shows which ones failed       |
    |                                             |
 ```
@@ -60,6 +69,22 @@ For **Facebook** (3 accounts: US, Europe, Canada) and **TikTok**, it compares:
 - **Spend** - money spent on ads
 - **Impressions** - how many times ads were shown
 - **Clicks** - how many people clicked
+
+For **Shopify**, it compares:
+- **Order Count** - number of orders in the period
+- **Revenue** - total revenue (sum of total_price)
+
+### Understanding the parameters
+
+| Parameter | What it does | Default |
+|-----------|-------------|---------|
+| *(no parameter)* | Checks **all 3 platforms** for the last **14 days** | All platforms, 14 days, 2% tolerance |
+| `--platform` | Choose which platform to check: `shopify`, `facebook`, `tiktok`, or `all` | `all` |
+| `--days` | How many days to look back from today | `14` |
+| `--start-date` | Start of the date range (format: `YYYY-MM-DD`). Overrides `--days` | *(auto-calculated)* |
+| `--end-date` | End of the date range (format: `YYYY-MM-DD`) | *(2 days ago, to let attribution settle)* |
+| `--tolerance` | Acceptable difference in percent. Below this = MATCH | `2` (= 2%) |
+| `--no-animation` | Skip the visual animations (runs faster) | *(animations on)* |
 
 ---
 
@@ -98,6 +123,8 @@ For **Facebook** (3 accounts: US, Europe, Canada) and **TikTok**, it compares:
 | "credentials not configured" | Missing config file | Contact the team |
 | "FAILED: BigQuery" at step 1 | Not authenticated | Run `gcloud auth login` first |
 | All TikTok = SKIPPED | TikTok token expired | Contact the team |
+| Shopify "HTTP 401" | Shopify access token expired | Contact the team |
+| Shopify order count = 0 | Date range has no orders | Try a wider date range (--days 30) |
 
 ---
 
@@ -184,10 +211,71 @@ gcloud compute ssh instance-20260129-133637 --zone=us-central1-a --tunnel-throug
 
 ---
 
-## 7. Quick reference
+## 7. Common commands (copy-paste ready)
+
+### Daily morning check (all platforms, last 14 days)
+```
+python data_validation/live_reconciliation.py
+```
+
+### Check only Shopify
+```
+python data_validation/live_reconciliation.py --platform shopify
+```
+
+### Check only Facebook
+```
+python data_validation/live_reconciliation.py --platform facebook
+```
+
+### Check only TikTok
+```
+python data_validation/live_reconciliation.py --platform tiktok
+```
+
+### Check a specific month (e.g. January 2026)
+```
+python data_validation/live_reconciliation.py --start-date 2026-01-01 --end-date 2026-01-31
+```
+
+### Check last 30 days instead of 14
+```
+python data_validation/live_reconciliation.py --days 30
+```
+
+### Check yesterday only
+```
+python data_validation/live_reconciliation.py --days 1
+```
+
+### Check one platform for a specific period
+```
+python data_validation/live_reconciliation.py --platform shopify --start-date 2026-02-01 --end-date 2026-02-10
+```
+
+### Allow 5% tolerance instead of 2%
+```
+python data_validation/live_reconciliation.py --tolerance 5
+```
+
+### Fast mode (no animation, for quick checks)
+```
+python data_validation/live_reconciliation.py --no-animation
+```
+
+### Combine options
+```
+python data_validation/live_reconciliation.py --platform facebook --days 30 --tolerance 5 --no-animation
+```
+
+---
+
+## 8. Quick reference
 
 ```
 Morning check    : python data_validation/live_reconciliation.py
+Shopify only     : python data_validation/live_reconciliation.py --platform shopify
+Custom dates     : python data_validation/live_reconciliation.py --start-date 2026-01-01 --end-date 2026-01-31
 Dashboard        : streamlit run data_explorer.py
 BigQuery console : https://console.cloud.google.com/bigquery?project=hulken
 Re-authenticate  : gcloud auth login
