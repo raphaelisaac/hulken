@@ -20,16 +20,17 @@ Moving raw tables to another dataset would break Airbyte (3 connections), PII ha
 
 ## Safe solution: new dataset `ads_analyst`
 
-Create a NEW dataset `ads_analyst` with **14 smart views** that:
+Create a NEW dataset `ads_analyst` with **15 smart views** that:
 - Only expose useful, populated columns (not 97)
 - Fix format differences (GID order IDs → numeric)
 - Unify duplicate tables (2 orders tables → 1)
 - Remove always-NULL columns
+- Add cross-platform performance view (Facebook + TikTok combined)
 - `ads_data` stays 100% untouched
 
 ---
 
-## The 14 views
+## The 15 views
 
 ### shopify_orders (unified, from 2 tables)
 
@@ -135,6 +136,76 @@ Keep as-is.
 
 Keep as-is. Needed for campaign name lookups.
 
+### unified_ads_performance (NEW cross-platform view)
+
+Combines ad spend (Facebook, TikTok) with Shopify revenue (from UTM attribution) into one daily table. This is the **ROAS view** — the analyst sees spend, revenue, and return on ad spend per platform per day.
+
+**How it works:** Ad spend comes from `facebook_insights` and `tiktok_ads_reports_daily`. Revenue comes from `shopify_utm` grouped by `first_utm_source` mapped to each platform. Direct/organic and Amazon revenue (no ad spend) are included as separate channels for the full picture.
+
+| Column | Source |
+|--------|--------|
+| `date` | `date_start` (Facebook) / `report_date` (TikTok) / `created_at` (Shopify) |
+| `platform` | 'facebook', 'tiktok', 'google', 'direct_organic', 'amazon', 'other' |
+| `spend` | From ad platform (NULL for organic/amazon) |
+| `impressions` | From ad platform (NULL for organic/amazon) |
+| `clicks` | From ad platform (NULL for organic/amazon) |
+| `shopify_orders` | Count of orders from `shopify_utm` attributed to this platform |
+| `shopify_revenue` | Sum of `total_price` from `shopify_utm` attributed to this platform |
+| `roas` | Calculated: shopify_revenue / spend (NULL when no spend) |
+| `cpc` | Calculated: spend / clicks |
+| `cpm` | Calculated: (spend / impressions) * 1000 |
+
+**UTM source mapping:**
+
+| `first_utm_source` in shopify_utm | → `platform` |
+|-----------------------------------|-------------|
+| `facebook-fb`, `facebook-ig`, `facebook` | facebook |
+| `tiktok-TikTok`, `tiktok-unknown` | tiktok |
+| `google` | google |
+| `Klaviyo`, `omnisend` | email |
+| `attribution_status = 'DIRECT_OR_ORGANIC'` | direct_organic |
+| `attribution_status = 'AMAZON_NO_TRACKING'` | amazon |
+| Everything else | other |
+
+**Real numbers (Feb 2026):**
+
+```
+Date        Platform         Spend      Revenue    Orders  ROAS
+2026-02-08  facebook        $21,503    $29,722      181    1.38x
+2026-02-08  direct_organic       $0    $41,258      250      -
+2026-02-08  amazon               $0    $23,699      177      -
+2026-02-08  tiktok           $2,740     $1,007        6    0.37x
+```
+
+**Why:** The analyst currently queries Facebook spend, TikTok spend, and Shopify revenue in 3 separate queries then manually combines in Excel. This view gives the full daily P&L by channel in one query.
+
+---
+
+## Known issue: PII pipeline bug
+
+**URGENT.** The PII hash scheduled query nullifies `email` BEFORE hashing for some customers. Result: `email_hash` is NULL for those customers, making cross-table matching impossible (orders ↔ customers ↔ UTM).
+
+- **Impact:** ~30% of customers in `shopify_live_customers_clean` have NULL `email_hash`
+- **Cause:** The PII script runs `SET email = NULL` before the hash step completes for all rows
+- **Fix needed:** Modify the scheduled query to hash first, nullify second
+- **Workaround:** Use `last_order_id` to join customers ↔ orders instead of `email_hash`
+
+This is independent of the `ads_analyst` dataset but should be fixed to make the views fully useful.
+
+---
+
+## Pending: 3 Facebook breakdown views
+
+After the Facebook full sync (Job 150) completes with all streams, these additional views can be created:
+
+| View | Source | Status |
+|------|--------|--------|
+| `facebook_insights_action_type` | Breakdown by conversion type | Waiting for stream data |
+| `facebook_insights_dma` | Breakdown by DMA region | Waiting for stream data |
+| `facebook_insights_platform_device` | Breakdown by device/platform | Waiting for stream data |
+
+These are **not blocking** the `ads_analyst` dataset creation. They can be added later.
+
 ---
 
 ## Analyst questions answered
@@ -159,7 +230,7 @@ From `Hulken Shopify MetaData.txt`:
 
 ```
 BEFORE (ads_data)                      AFTER (ads_analyst)
-40 names, 97-column tables             14 names, 10-15 columns each
+40 names, 97-column tables             15 names, 10-15 columns each
 
 facebook_ad_creatives          |       facebook_insights
 facebook_ad_sets               |       facebook_campaigns_daily
@@ -177,9 +248,10 @@ tiktokads                      |       shopify_products
 tiktokads_reports_daily        |       shopify_line_items
 tiktokad_groups                |
 tiktokad_groups_reports_daily  |
-tiktokcampaigns                |       + google_Ads (own dataset)
-tiktokcampaigns_reports_daily  |       + analytics_* (own datasets)
-tiktokadvertisers_reports...   |
+tiktokcampaigns                |       unified_ads_performance (ROAS!)
+tiktokcampaigns_reports_daily  |
+tiktokadvertisers_reports...   |       + google_Ads (own dataset)
+                               |       + analytics_* (own datasets)
 shopify_line_items             |
 shopify_live_customers         |
 shopify_live_customers_clean   |

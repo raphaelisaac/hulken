@@ -5,8 +5,8 @@ LIVE RECONCILIATION DEMO
 Visual, step-by-step API vs BigQuery comparison.
 Designed to be run in front of clients to demonstrate data integrity.
 
-Calls Facebook Marketing API and TikTok Marketing API, then queries BigQuery,
-and shows a side-by-side comparison with match/mismatch indicators.
+Calls Shopify API, Facebook Marketing API, and TikTok Marketing API,
+then queries BigQuery, and shows a side-by-side comparison with match/mismatch indicators.
 
 Usage:
     python data_validation/live_reconciliation.py
@@ -14,6 +14,8 @@ Usage:
     python data_validation/live_reconciliation.py --start-date 2025-01-01 --end-date 2025-01-31
     python data_validation/live_reconciliation.py --no-animation
     python data_validation/live_reconciliation.py --tolerance 5
+    python data_validation/live_reconciliation.py --platform shopify
+    python data_validation/live_reconciliation.py --platform all
 """
 
 import os
@@ -192,6 +194,64 @@ def get_facebook_api_stats(account_id, access_token, start_date, end_date):
         print(f"  {C.RED}  Request failed: {e}{C.END}")
         return None
 
+def get_shopify_api_order_count(store, token, start_date, end_date):
+    """Get order count from Shopify REST API."""
+    url = f"https://{store}.myshopify.com/admin/api/2024-01/orders/count.json"
+    headers = {"X-Shopify-Access-Token": token}
+    params = {
+        "status": "any",
+        "created_at_min": f"{start_date}T00:00:00Z",
+        "created_at_max": f"{end_date}T23:59:59Z"
+    }
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        if resp.status_code == 200:
+            return {'order_count': resp.json().get('count', 0)}
+        else:
+            print(f"  {C.RED}  Shopify API Error: HTTP {resp.status_code}{C.END}")
+            return None
+    except Exception as e:
+        print(f"  {C.RED}  Request failed: {e}{C.END}")
+        return None
+
+
+def get_shopify_api_revenue(store, token, start_date, end_date):
+    """Get total revenue from Shopify REST API by paginating orders."""
+    url = f"https://{store}.myshopify.com/admin/api/2024-01/orders.json"
+    headers = {"X-Shopify-Access-Token": token}
+    total_revenue = 0.0
+    total_orders = 0
+    params = {
+        "status": "any",
+        "created_at_min": f"{start_date}T00:00:00Z",
+        "created_at_max": f"{end_date}T23:59:59Z",
+        "fields": "id,total_price",
+        "limit": 250
+    }
+    try:
+        while url:
+            resp = requests.get(url, headers=headers, params=params, timeout=60)
+            if resp.status_code != 200:
+                print(f"  {C.RED}  Shopify API Error: HTTP {resp.status_code}{C.END}")
+                break
+            orders = resp.json().get('orders', [])
+            for o in orders:
+                total_revenue += float(o.get('total_price', 0))
+                total_orders += 1
+            # Follow pagination via Link header
+            link = resp.headers.get('Link', '')
+            if 'rel="next"' in link:
+                next_url = link.split('>; rel="next"')[0].split('<')[-1]
+                url = next_url
+                params = None  # params are in the URL for subsequent pages
+            else:
+                url = None
+        return {'revenue': round(total_revenue, 2), 'order_count': total_orders}
+    except Exception as e:
+        print(f"  {C.RED}  Request failed: {e}{C.END}")
+        return None
+
+
 def get_tiktok_api_stats(access_token, advertiser_id, start_date, end_date):
     """Get stats from TikTok Marketing API."""
     url = "https://business-api.tiktok.com/open_api/v1.3/report/integrated/get/"
@@ -273,10 +333,26 @@ def get_bq_tiktok_stats(client, start_date, end_date):
         print(f"  {C.RED}  BigQuery Error: {e}{C.END}")
         return None
 
+def get_bq_shopify_stats(client, start_date, end_date):
+    """Get Shopify order count and revenue from BigQuery _clean table."""
+    sql = f"""
+    SELECT
+        COUNT(*) AS order_count,
+        COALESCE(ROUND(SUM(CAST(total_price AS FLOAT64)), 2), 0) AS total_revenue
+    FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_orders_clean`
+    WHERE DATE(created_at) BETWEEN '{start_date}' AND '{end_date}'
+    """
+    try:
+        row = list(client.query(sql).result())[0]
+        return {
+            'order_count': int(row.order_count or 0),
+            'revenue': float(row.total_revenue or 0),
+        }
+    except Exception as e:
+        print(f"  {C.RED}  BigQuery Error: {e}{C.END}")
+        return None
 
-# ============================================================
-# MAIN
-# ============================================================
+
 def get_bq_data_freshness(client, platform):
     """Check when BigQuery data was last synced for a platform."""
     if platform == 'facebook':
@@ -288,6 +364,11 @@ def get_bq_data_freshness(client, platform):
         sql = f"""
         SELECT MAX(_airbyte_extracted_at) AS last_sync
         FROM `{BQ_PROJECT}.{BQ_DATASET}.tiktokads_reports_daily`
+        """
+    elif platform == 'shopify':
+        sql = f"""
+        SELECT MAX(_airbyte_extracted_at) AS last_sync
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_orders`
         """
     else:
         return None
@@ -305,6 +386,8 @@ def main():
     parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD). Overrides default')
     parser.add_argument('--tolerance', type=float, default=None, help='Match tolerance in percent (default: 2)')
     parser.add_argument('--no-animation', action='store_true', help='Disable animation delays')
+    parser.add_argument('--platform', type=str, default='all',
+                        help='Platform(s) to check: all, facebook, tiktok, shopify (default: all)')
     args = parser.parse_args()
 
     global TOLERANCE
@@ -341,10 +424,21 @@ def main():
     print(f"  {C.DIM}  Tolerance: {TOLERANCE*100:.0f}%{C.END}")
 
     all_results = []  # (platform, metric, match_bool)
-    total_steps = 8
+    selected = args.platform.lower()
+    run_facebook = selected in ('all', 'facebook')
+    run_tiktok = selected in ('all', 'tiktok')
+    run_shopify = selected in ('all', 'shopify')
 
-    # ── STEP 1: CONNECT TO BIGQUERY ────────────────────────
-    print_step(1, total_steps, "CONNECT — BigQuery")
+    # Calculate total steps dynamically: connect(1) + 3 per platform + scoreboard(1)
+    total_steps = 2  # connect + scoreboard
+    if run_facebook: total_steps += 3
+    if run_tiktok: total_steps += 3
+    if run_shopify: total_steps += 3
+    step = 0
+
+    # ── STEP: CONNECT TO BIGQUERY ──────────────────────────
+    step += 1
+    print_step(step, total_steps, "CONNECT — BigQuery")
     print_progress("Connecting to BigQuery", animated)
     try:
         bq_client = bigquery.Client(project=BQ_PROJECT)
@@ -352,7 +446,11 @@ def main():
         list(bq_client.query(f"SELECT 1").result())
         print(f"  {C.GREEN}  Connected to project '{BQ_PROJECT}', dataset '{BQ_DATASET}'{C.END}")
         # Show data freshness
-        for plat in ['facebook', 'tiktok']:
+        freshness_platforms = []
+        if run_facebook: freshness_platforms.append('facebook')
+        if run_tiktok: freshness_platforms.append('tiktok')
+        if run_shopify: freshness_platforms.append('shopify')
+        for plat in freshness_platforms:
             last_sync = get_bq_data_freshness(bq_client, plat)
             if last_sync:
                 hours_ago = (datetime.utcnow() - last_sync.replace(tzinfo=None)).total_seconds() / 3600
@@ -363,125 +461,187 @@ def main():
         print(f"\n  {C.RED}Cannot proceed without BigQuery connection.{C.END}")
         return 1
 
-    # ── STEP 2: FACEBOOK API ───────────────────────────────
-    print_step(2, total_steps, "FACEBOOK API — Calling Facebook Marketing API v18.0")
+    # ── FACEBOOK ─────────────────────────────────────────────
+    if run_facebook:
+        step += 1
+        print_step(step, total_steps, "FACEBOOK API — Calling Facebook Marketing API v18.0")
 
-    fb_access_token = os.getenv('FACEBOOK_ACCESS_TOKEN')
-    fb_account_ids = [a.strip() for a in os.getenv('FACEBOOK_ACCOUNT_IDS', '').split(',') if a.strip()]
+        fb_access_token = os.getenv('FACEBOOK_ACCESS_TOKEN')
+        fb_account_ids = [a.strip() for a in os.getenv('FACEBOOK_ACCOUNT_IDS', '').split(',') if a.strip()]
 
-    fb_api_results = {}
-    fb_account_names = {}
+        fb_api_results = {}
+        fb_account_names = {}
 
-    if not fb_access_token or not fb_account_ids:
-        print(f"  {C.YELLOW}  Facebook credentials not configured — skipping{C.END}")
-    else:
-        for acct_id in fb_account_ids:
-            name = get_facebook_account_name(acct_id, fb_access_token)
-            fb_account_names[acct_id] = name
-            print_progress(f"Querying account: {name} ({acct_id})", animated)
-            stats = get_facebook_api_stats(acct_id, fb_access_token, start_date, end_date)
-            if stats:
-                fb_api_results[acct_id] = stats
-                print(f"  {C.GREEN}  {name}: spend={format_money(stats['spend'])}, impressions={format_number(stats['impressions'])}, clicks={format_number(stats['clicks'])}{C.END}")
-            else:
-                print(f"  {C.YELLOW}  {name}: no data or API error{C.END}")
-
-    # ── STEP 3: FACEBOOK BIGQUERY ──────────────────────────
-    print_step(3, total_steps, "FACEBOOK BQ — Querying BigQuery facebook_insights")
-
-    fb_bq_results = {}
-    for acct_id in fb_api_results:
-        name = fb_account_names[acct_id]
-        print_progress(f"Querying BigQuery for {name}", animated)
-        stats = get_bq_facebook_stats(bq_client, acct_id, start_date, end_date)
-        if stats:
-            fb_bq_results[acct_id] = stats
-            print(f"  {C.GREEN}  {name}: spend={format_money(stats['spend'])}, impressions={format_number(stats['impressions'])}, clicks={format_number(stats['clicks'])}{C.END}")
-
-    # ── STEP 4: FACEBOOK COMPARE ───────────────────────────
-    print_step(4, total_steps, "FACEBOOK COMPARE — Side-by-side comparison")
-
-    for acct_id in fb_api_results:
-        if acct_id not in fb_bq_results:
-            continue
-        name = fb_account_names[acct_id]
-        api = fb_api_results[acct_id]
-        bq = fb_bq_results[acct_id]
-
-        # Skip zero-data accounts (e.g. dormant Canada account)
-        if api['spend'] == 0 and api['impressions'] == 0 and bq['spend'] == 0 and bq['impressions'] == 0:
-            print(f"\n  {C.YELLOW}  {name}: No activity in this period — skipped{C.END}")
-            print(f"  {C.DIM}  Tip: Try a different date range (e.g. --start-date 2024-11-01 --end-date 2024-12-01){C.END}")
-            all_results.append((f"Facebook ({name})", "All metrics", None))  # None = skipped
-            continue
-
-        comparisons = [
-            ("Spend", api['spend'], bq['spend'], format_money),
-            ("Impressions", api['impressions'], bq['impressions'], format_number),
-            ("Clicks", api['clicks'], bq['clicks'], format_number),
-        ]
-
-        results = print_comparison_box(
-            f"FACEBOOK ADS — {name}",
-            "Facebook Marketing API v18.0",
-            start_date, end_date,
-            comparisons, animated
-        )
-
-        for (metric_name, _, _, _), matched in zip(comparisons, results):
-            all_results.append((f"Facebook ({name})", metric_name, matched))
-
-    # ── STEP 5: TIKTOK API ─────────────────────────────────
-    print_step(5, total_steps, "TIKTOK API — Calling TikTok Marketing API v1.3")
-
-    tt_access_token = os.getenv('TIKTOK_ACCESS_TOKEN')
-    tt_advertiser_id = os.getenv('TIKTOK_ADVERTISER_ID')
-
-    tt_api_stats = None
-    if not tt_access_token or not tt_advertiser_id:
-        print(f"  {C.YELLOW}  TikTok credentials not configured — skipping{C.END}")
-    else:
-        print_progress(f"Querying advertiser {tt_advertiser_id}", animated)
-        tt_api_stats = get_tiktok_api_stats(tt_access_token, tt_advertiser_id, start_date, end_date)
-        if tt_api_stats:
-            print(f"  {C.GREEN}  TikTok: spend={format_money(tt_api_stats['spend'])}, impressions={format_number(tt_api_stats['impressions'])}, clicks={format_number(tt_api_stats['clicks'])}{C.END}")
+        if not fb_access_token or not fb_account_ids:
+            print(f"  {C.YELLOW}  Facebook credentials not configured — skipping{C.END}")
         else:
-            print(f"  {C.YELLOW}  TikTok: no data or API error{C.END}")
+            for acct_id in fb_account_ids:
+                name = get_facebook_account_name(acct_id, fb_access_token)
+                fb_account_names[acct_id] = name
+                print_progress(f"Querying account: {name} ({acct_id})", animated)
+                stats = get_facebook_api_stats(acct_id, fb_access_token, start_date, end_date)
+                if stats:
+                    fb_api_results[acct_id] = stats
+                    print(f"  {C.GREEN}  {name}: spend={format_money(stats['spend'])}, impressions={format_number(stats['impressions'])}, clicks={format_number(stats['clicks'])}{C.END}")
+                else:
+                    print(f"  {C.YELLOW}  {name}: no data or API error{C.END}")
 
-    # ── STEP 6: TIKTOK BIGQUERY ────────────────────────────
-    print_step(6, total_steps, "TIKTOK BQ — Querying BigQuery tiktok_ads_reports_daily")
+        step += 1
+        print_step(step, total_steps, "FACEBOOK BQ — Querying BigQuery facebook_insights")
 
-    tt_bq_stats = None
-    if tt_api_stats:
-        print_progress("Querying BigQuery for TikTok", animated)
-        tt_bq_stats = get_bq_tiktok_stats(bq_client, start_date, end_date)
-        if tt_bq_stats:
-            print(f"  {C.GREEN}  TikTok BQ: spend={format_money(tt_bq_stats['spend'])}, impressions={format_number(tt_bq_stats['impressions'])}, clicks={format_number(tt_bq_stats['clicks'])}{C.END}")
+        fb_bq_results = {}
+        for acct_id in fb_api_results:
+            name = fb_account_names[acct_id]
+            print_progress(f"Querying BigQuery for {name}", animated)
+            stats = get_bq_facebook_stats(bq_client, acct_id, start_date, end_date)
+            if stats:
+                fb_bq_results[acct_id] = stats
+                print(f"  {C.GREEN}  {name}: spend={format_money(stats['spend'])}, impressions={format_number(stats['impressions'])}, clicks={format_number(stats['clicks'])}{C.END}")
 
-    # ── STEP 7: TIKTOK COMPARE ─────────────────────────────
-    print_step(7, total_steps, "TIKTOK COMPARE — Side-by-side comparison")
+        step += 1
+        print_step(step, total_steps, "FACEBOOK COMPARE — Side-by-side comparison")
 
-    if tt_api_stats and tt_bq_stats:
-        comparisons = [
-            ("Spend", tt_api_stats['spend'], tt_bq_stats['spend'], format_money),
-            ("Impressions", tt_api_stats['impressions'], tt_bq_stats['impressions'], format_number),
-            ("Clicks", tt_api_stats['clicks'], tt_bq_stats['clicks'], format_number),
-        ]
+        for acct_id in fb_api_results:
+            if acct_id not in fb_bq_results:
+                continue
+            name = fb_account_names[acct_id]
+            api = fb_api_results[acct_id]
+            bq = fb_bq_results[acct_id]
 
-        results = print_comparison_box(
-            "TIKTOK ADS",
-            "TikTok Marketing API v1.3",
-            start_date, end_date,
-            comparisons, animated
-        )
+            # Skip zero-data accounts (e.g. dormant Canada account)
+            if api['spend'] == 0 and api['impressions'] == 0 and bq['spend'] == 0 and bq['impressions'] == 0:
+                print(f"\n  {C.YELLOW}  {name}: No activity in this period — skipped{C.END}")
+                print(f"  {C.DIM}  Tip: Try a different date range (e.g. --start-date 2024-11-01 --end-date 2024-12-01){C.END}")
+                all_results.append((f"Facebook ({name})", "All metrics", None))  # None = skipped
+                continue
 
-        for (metric_name, _, _, _), matched in zip(comparisons, results):
-            all_results.append(("TikTok", metric_name, matched))
-    else:
-        print(f"  {C.YELLOW}  Skipped — missing API or BigQuery data{C.END}")
+            comparisons = [
+                ("Spend", api['spend'], bq['spend'], format_money),
+                ("Impressions", api['impressions'], bq['impressions'], format_number),
+                ("Clicks", api['clicks'], bq['clicks'], format_number),
+            ]
 
-    # ── STEP 8: SCOREBOARD ─────────────────────────────────
-    print_step(8, total_steps, "SCOREBOARD — Final Results", C.BOLD)
+            results = print_comparison_box(
+                f"FACEBOOK ADS — {name}",
+                "Facebook Marketing API v18.0",
+                start_date, end_date,
+                comparisons, animated
+            )
+
+            for (metric_name, _, _, _), matched in zip(comparisons, results):
+                all_results.append((f"Facebook ({name})", metric_name, matched))
+
+    # ── TIKTOK ──────────────────────────────────────────────
+    if run_tiktok:
+        step += 1
+        print_step(step, total_steps, "TIKTOK API — Calling TikTok Marketing API v1.3")
+
+        tt_access_token = os.getenv('TIKTOK_ACCESS_TOKEN')
+        tt_advertiser_id = os.getenv('TIKTOK_ADVERTISER_ID')
+
+        tt_api_stats = None
+        if not tt_access_token or not tt_advertiser_id:
+            print(f"  {C.YELLOW}  TikTok credentials not configured — skipping{C.END}")
+        else:
+            print_progress(f"Querying advertiser {tt_advertiser_id}", animated)
+            tt_api_stats = get_tiktok_api_stats(tt_access_token, tt_advertiser_id, start_date, end_date)
+            if tt_api_stats:
+                print(f"  {C.GREEN}  TikTok: spend={format_money(tt_api_stats['spend'])}, impressions={format_number(tt_api_stats['impressions'])}, clicks={format_number(tt_api_stats['clicks'])}{C.END}")
+            else:
+                print(f"  {C.YELLOW}  TikTok: no data or API error{C.END}")
+
+        step += 1
+        print_step(step, total_steps, "TIKTOK BQ — Querying BigQuery tiktok_ads_reports_daily")
+
+        tt_bq_stats = None
+        if tt_api_stats:
+            print_progress("Querying BigQuery for TikTok", animated)
+            tt_bq_stats = get_bq_tiktok_stats(bq_client, start_date, end_date)
+            if tt_bq_stats:
+                print(f"  {C.GREEN}  TikTok BQ: spend={format_money(tt_bq_stats['spend'])}, impressions={format_number(tt_bq_stats['impressions'])}, clicks={format_number(tt_bq_stats['clicks'])}{C.END}")
+
+        step += 1
+        print_step(step, total_steps, "TIKTOK COMPARE — Side-by-side comparison")
+
+        if tt_api_stats and tt_bq_stats:
+            comparisons = [
+                ("Spend", tt_api_stats['spend'], tt_bq_stats['spend'], format_money),
+                ("Impressions", tt_api_stats['impressions'], tt_bq_stats['impressions'], format_number),
+                ("Clicks", tt_api_stats['clicks'], tt_bq_stats['clicks'], format_number),
+            ]
+
+            results = print_comparison_box(
+                "TIKTOK ADS",
+                "TikTok Marketing API v1.3",
+                start_date, end_date,
+                comparisons, animated
+            )
+
+            for (metric_name, _, _, _), matched in zip(comparisons, results):
+                all_results.append(("TikTok", metric_name, matched))
+        else:
+            print(f"  {C.YELLOW}  Skipped — missing API or BigQuery data{C.END}")
+
+    # ── SHOPIFY ────────────────────────────────────────────
+    if run_shopify:
+        step += 1
+        print_step(step, total_steps, "SHOPIFY API — Calling Shopify REST API")
+
+        sh_store = os.getenv('SHOPIFY_STORE')
+        sh_token = os.getenv('SHOPIFY_ACCESS_TOKEN')
+
+        sh_api_stats = None
+        if not sh_store or not sh_token:
+            print(f"  {C.YELLOW}  Shopify credentials not configured — skipping{C.END}")
+        else:
+            print_progress(f"Querying store: {sh_store}", animated)
+            # Get order count first (fast), then revenue with pagination
+            count_data = get_shopify_api_order_count(sh_store, sh_token, start_date, end_date)
+            if count_data:
+                print(f"  {C.GREEN}  Order count (API): {format_number(count_data['order_count'])}{C.END}")
+                print_progress("Fetching revenue (paginated)", animated)
+                revenue_data = get_shopify_api_revenue(sh_store, sh_token, start_date, end_date)
+                if revenue_data:
+                    sh_api_stats = {
+                        'order_count': count_data['order_count'],
+                        'revenue': revenue_data['revenue'],
+                    }
+                    print(f"  {C.GREEN}  Revenue (API): {format_money(sh_api_stats['revenue'])} from {format_number(revenue_data['order_count'])} orders{C.END}")
+
+        step += 1
+        print_step(step, total_steps, "SHOPIFY BQ — Querying BigQuery shopify_live_orders_clean")
+
+        sh_bq_stats = None
+        if sh_api_stats:
+            print_progress("Querying BigQuery for Shopify", animated)
+            sh_bq_stats = get_bq_shopify_stats(bq_client, start_date, end_date)
+            if sh_bq_stats:
+                print(f"  {C.GREEN}  Shopify BQ: orders={format_number(sh_bq_stats['order_count'])}, revenue={format_money(sh_bq_stats['revenue'])}{C.END}")
+
+        step += 1
+        print_step(step, total_steps, "SHOPIFY COMPARE — Side-by-side comparison")
+
+        if sh_api_stats and sh_bq_stats:
+            comparisons = [
+                ("Order Count", sh_api_stats['order_count'], sh_bq_stats['order_count'], format_number),
+                ("Revenue", sh_api_stats['revenue'], sh_bq_stats['revenue'], format_money),
+            ]
+
+            results = print_comparison_box(
+                "SHOPIFY ORDERS",
+                f"Shopify REST API ({sh_store})",
+                start_date, end_date,
+                comparisons, animated
+            )
+
+            for (metric_name, _, _, _), matched in zip(comparisons, results):
+                all_results.append(("Shopify", metric_name, matched))
+        else:
+            print(f"  {C.YELLOW}  Skipped — missing API or BigQuery data{C.END}")
+
+    # ── SCOREBOARD ─────────────────────────────────────────
+    step += 1
+    print_step(step, total_steps, "SCOREBOARD — Final Results", C.BOLD)
 
     animate_delay(0.5, animated)
 
