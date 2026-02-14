@@ -71,3 +71,9 @@ build/
 *~
 Thumbs.db
 .DS_Store
+
+# Monitoring & results
+data_validation/reconciliation_results.json
+data_validation/known_tables.json
+known_tables.json
+*.log
