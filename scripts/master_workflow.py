@@ -178,10 +178,17 @@ def step4_check_data_freshness():
     return success
 
 def step5_consistent_pii_encoding():
-    """Ensure PII encoding is consistent across all tables"""
+    """Ensure PII encoding is consistent across all tables
+
+    IMPORTANT: NULL values are PRESERVED (not hashed)
+    - pii_hash_reference contains only non-NULL email hashes
+    - NULL emails stay NULL (representing missing data, guest checkouts, etc.)
+    - Same non-NULL email = same hash everywhere
+    """
     print_step(5, "Encoding PII Cohérent", "🔐")
 
     print_info("Création d'une table de référence pour hashing cohérent...")
+    print_info("⚠️  IMPORTANT: Les valeurs NULL ne sont PAS encryptées (restent NULL)")
 
     # Create a master email hash reference table
     cmd = f"""
@@ -189,12 +196,12 @@ def step5_consistent_pii_encoding():
     CREATE OR REPLACE TABLE `{BQ_PROJECT}.{BQ_DATASET}.pii_hash_reference` AS
 
     WITH all_emails AS (
-      -- Shopify emails
+      -- Shopify emails (excluding NULL)
       SELECT DISTINCT
         email_hash AS email_hash_original,
         \"shopify\" AS source
       FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_customers_clean`
-      WHERE email_hash IS NOT NULL
+      WHERE email_hash IS NOT NULL  -- NULL values excluded from hashing
 
       UNION DISTINCT
 
@@ -202,7 +209,7 @@ def step5_consistent_pii_encoding():
         email_hash,
         \"shopify_orders\" AS source
       FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_orders_clean`
-      WHERE email_hash IS NOT NULL
+      WHERE email_hash IS NOT NULL  -- NULL values excluded from hashing
     )
 
     SELECT
@@ -221,7 +228,22 @@ def step5_consistent_pii_encoding():
 
     if success:
         print_success("Table pii_hash_reference créée!")
-        print_info("Tous les emails auront maintenant le même hash partout")
+        print_info("Emails non-NULL: même hash partout")
+        print_info("Emails NULL: restent NULL (données manquantes, guest checkouts)")
+
+        # Verify NULL count
+        check_cmd = f"""
+        bq query --project_id={BQ_PROJECT} --use_legacy_sql=false --format=csv '
+        SELECT
+          COUNT(*) AS total_hashes,
+          COUNT(DISTINCT email_hash_original) AS unique_emails
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.pii_hash_reference`
+        '
+        """
+
+        check_success, check_output = run_command(check_cmd, "Vérification table PII")
+        if check_success:
+            print(check_output)
 
     return success
 
