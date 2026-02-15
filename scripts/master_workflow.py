@@ -181,71 +181,106 @@ def step5_consistent_pii_encoding():
     """Ensure PII encoding is consistent across all tables
 
     IMPORTANT: NULL values are PRESERVED (not hashed)
-    - pii_hash_reference contains only non-NULL email hashes
-    - NULL emails stay NULL (representing missing data, guest checkouts, etc.)
-    - Same non-NULL email = same hash everywhere
-    """
-    print_step(5, "Encoding PII Cohérent", "🔐")
+    - PII reference tables contain only non-NULL values
+    - NULL values stay NULL (representing missing data, guest checkouts, etc.)
+    - Same non-NULL value = same hash everywhere
 
-    print_info("Création d'une table de référence pour hashing cohérent...")
+    PII Fields Covered:
+    - email_hash
+    - phone_hash
+    - first_name_hash
+    - last_name_hash
+    - addresses_hash / default_address_hash
+    - browser_ip
+    """
+    print_step(5, "Encoding PII Cohérent (TOUTES Données Sensibles)", "🔐")
+
+    print_info("Création tables de référence pour TOUTES les PII...")
     print_info("⚠️  IMPORTANT: Les valeurs NULL ne sont PAS encryptées (restent NULL)")
+    print_info("PII couvertes: email, phone, first_name, last_name, address, IP")
 
-    # Create a master email hash reference table
-    cmd = f"""
-    bq query --project_id={BQ_PROJECT} --use_legacy_sql=false '
-    CREATE OR REPLACE TABLE `{BQ_PROJECT}.{BQ_DATASET}.pii_hash_reference` AS
+    # Check if complete PII script exists
+    pii_script = PROJECT_DIR / "sql" / "create_complete_pii_reference.sql"
 
-    WITH all_emails AS (
-      -- Shopify emails (excluding NULL)
-      SELECT DISTINCT
-        email_hash AS email_hash_original,
-        \"shopify\" AS source
-      FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_customers_clean`
-      WHERE email_hash IS NOT NULL  -- NULL values excluded from hashing
+    if pii_script.exists():
+        print_info("Exécution script PII complet (email, phone, name, address, IP)...")
 
-      UNION DISTINCT
+        # Execute the complete PII reference script
+        # Note: This script creates 7 tables (email, phone, first_name, last_name, address, ip, master)
+        cmd = f"bq query --project_id={BQ_PROJECT} --use_legacy_sql=false < {pii_script}"
+        success, output = run_command(cmd, "Création tables PII complètes", cwd=PROJECT_DIR)
 
-      SELECT DISTINCT
-        email_hash,
-        \"shopify_orders\" AS source
-      FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_orders_clean`
-      WHERE email_hash IS NOT NULL  -- NULL values excluded from hashing
-    )
+        if success:
+            print_success("Tables PII créées: email, phone, name, address, IP!")
 
-    SELECT
-      email_hash_original,
-      -- Create consistent hash using SHA256
-      TO_HEX(SHA256(email_hash_original)) AS email_hash_consistent,
-      STRING_AGG(DISTINCT source, \", \") AS sources,
-      COUNT(DISTINCT source) AS source_count
-    FROM all_emails
-    GROUP BY email_hash_original
-    ORDER BY source_count DESC
-    '
-    """
+            # Verify summary
+            check_cmd = f"""
+            bq query --project_id={BQ_PROJECT} --use_legacy_sql=false --format=pretty '
+            SELECT
+              pii_field,
+              COUNT(*) AS unique_values,
+              SUM(source_count) AS total_occurrences
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.pii_master_reference`
+            GROUP BY pii_field
+            ORDER BY unique_values DESC
+            LIMIT 10
+            '
+            """
 
-    success, output = run_command(cmd, "Création table de référence PII")
+            check_success, check_output = run_command(check_cmd, "Vérification PII summary")
+            if check_success:
+                print(check_output)
+                print_info("Valeurs non-NULL: même hash partout")
+                print_info("Valeurs NULL: restent NULL (données manquantes)")
 
-    if success:
-        print_success("Table pii_hash_reference créée!")
-        print_info("Emails non-NULL: même hash partout")
-        print_info("Emails NULL: restent NULL (données manquantes, guest checkouts)")
+        return success
 
-        # Verify NULL count
-        check_cmd = f"""
-        bq query --project_id={BQ_PROJECT} --use_legacy_sql=false --format=csv '
+    else:
+        # Fallback: create email reference only (backward compatibility)
+        print_warning("Script complet non trouvé, création email reference seulement...")
+
+        cmd = f"""
+        bq query --project_id={BQ_PROJECT} --use_legacy_sql=false '
+        CREATE OR REPLACE TABLE `{BQ_PROJECT}.{BQ_DATASET}.pii_email_reference` AS
+
+        WITH all_emails AS (
+          SELECT DISTINCT
+            email_hash AS email_hash_original,
+            \"shopify_customers\" AS source
+          FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_customers_clean`
+          WHERE email_hash IS NOT NULL
+
+          UNION DISTINCT
+
+          SELECT DISTINCT
+            email_hash,
+            \"shopify_orders\" AS source
+          FROM `{BQ_PROJECT}.{BQ_DATASET}.shopify_live_orders_clean`
+          WHERE email_hash IS NOT NULL
+        )
+
         SELECT
-          COUNT(*) AS total_hashes,
-          COUNT(DISTINCT email_hash_original) AS unique_emails
-        FROM `{BQ_PROJECT}.{BQ_DATASET}.pii_hash_reference`
+          email_hash_original,
+          TO_HEX(SHA256(email_hash_original)) AS email_hash_consistent,
+          STRING_AGG(DISTINCT source, \", \") AS sources,
+          COUNT(DISTINCT source) AS source_count
+        FROM all_emails
+        GROUP BY email_hash_original;
+
+        -- Backward compatibility view
+        CREATE OR REPLACE VIEW `{BQ_PROJECT}.{BQ_DATASET}.pii_hash_reference` AS
+        SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.pii_email_reference`;
         '
         """
 
-        check_success, check_output = run_command(check_cmd, "Vérification table PII")
-        if check_success:
-            print(check_output)
+        success, output = run_command(cmd, "Création email reference")
 
-    return success
+        if success:
+            print_success("Table pii_email_reference créée!")
+            print_info("Emails non-NULL: même hash partout")
+            print_info("Emails NULL: restent NULL")
+
+        return success
 
 def step6_unify_tables():
     """Run table unification with deduplication"""

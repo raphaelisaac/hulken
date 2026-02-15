@@ -11,27 +11,48 @@
 
 ### Pourquoi?
 
-| Cas | Email | Signification | Traitement |
-|-----|-------|---------------|------------|
-| **Valeur présente** | `john@example.com` | Client a fourni email | ✅ HASH |
-| **Valeur manquante** | `NULL` | Guest checkout, donnée manquante | ❌ PAS DE HASH |
+| Cas | Exemple | Signification | Traitement |
+|-----|---------|---------------|------------|
+| **Valeur présente** | `john@example.com` | Client a fourni donnée | ✅ HASH |
+| **Valeur manquante** | `NULL` | Guest checkout, donnée non fournie | ❌ PAS DE HASH |
 
 **NULL signifie "donnée manquante"** - c'est une information sémantique importante qui doit être préservée.
 
 ---
 
+## 📊 PII Couvertes
+
+Le système encode de façon cohérente **6 types de données sensibles:**
+
+| Type PII | Champ Source | Table de Référence | Exemple d'Usage |
+|----------|--------------|-------------------|-----------------|
+| **Email** | `email_hash` | `pii_email_reference` | Customer tracking, attribution |
+| **Téléphone** | `phone_hash` | `pii_phone_reference` | Customer tracking, SMS marketing |
+| **Prénom** | `first_name_hash` | `pii_first_name_reference` | Customer profiling |
+| **Nom** | `last_name_hash` | `pii_last_name_reference` | Customer profiling |
+| **Adresse** | `addresses_hash`, `default_address_hash` | `pii_address_reference` | Geographic analysis |
+| **IP Browser** | `browser_ip` | `pii_ip_reference` | Fraud detection |
+
+**Table Master:** `pii_master_reference` - Combine toutes les PII en une seule table
+
+---
+
 ## ✅ Implémentation Correcte
 
-### Étape 1: Table de Référence (Exclut NULL)
+### Étape 1: Tables de Référence (Excluent NULL)
+
+Le script `create_complete_pii_reference.sql` crée **7 tables** pour toutes les PII:
+
+#### 1. Email Reference
 
 ```sql
-CREATE OR REPLACE TABLE `hulken.ads_data.pii_hash_reference` AS
+CREATE OR REPLACE TABLE `hulken.ads_data.pii_email_reference` AS
 
 WITH all_emails AS (
   -- Shopify customers (NULL excluded)
   SELECT DISTINCT
     email_hash AS email_hash_original,
-    "shopify" AS source
+    'shopify_customers' AS source
   FROM `hulken.ads_data.shopify_live_customers_clean`
   WHERE email_hash IS NOT NULL  -- ✅ NULL values are EXCLUDED
 
@@ -39,8 +60,8 @@ WITH all_emails AS (
 
   -- Shopify orders (NULL excluded)
   SELECT DISTINCT
-    email_hash,
-    "shopify_orders" AS source
+    email_hash AS email_hash_original,
+    'shopify_orders' AS source
   FROM `hulken.ads_data.shopify_live_orders_clean`
   WHERE email_hash IS NOT NULL  -- ✅ NULL values are EXCLUDED
 )
@@ -48,16 +69,70 @@ WITH all_emails AS (
 SELECT
   email_hash_original,
   TO_HEX(SHA256(email_hash_original)) AS email_hash_consistent,
-  STRING_AGG(DISTINCT source, ", ") AS sources,
+  STRING_AGG(DISTINCT source, ', ') AS sources,
   COUNT(DISTINCT source) AS source_count
 FROM all_emails
-GROUP BY email_hash_original
-ORDER BY source_count DESC;
+GROUP BY email_hash_original;
+```
+
+#### 2. Phone Reference
+
+```sql
+CREATE OR REPLACE TABLE `hulken.ads_data.pii_phone_reference` AS
+
+WITH all_phones AS (
+  SELECT DISTINCT
+    phone_hash AS phone_hash_original,
+    'shopify_customers' AS source
+  FROM `hulken.ads_data.shopify_live_customers_clean`
+  WHERE phone_hash IS NOT NULL  -- ✅ NULL excluded
+
+  UNION DISTINCT
+
+  SELECT DISTINCT
+    phone_hash AS phone_hash_original,
+    'shopify_orders' AS source
+  FROM `hulken.ads_data.shopify_live_orders_clean`
+  WHERE phone_hash IS NOT NULL  -- ✅ NULL excluded
+)
+
+SELECT
+  phone_hash_original,
+  TO_HEX(SHA256(phone_hash_original)) AS phone_hash_consistent,
+  STRING_AGG(DISTINCT source, ', ') AS sources,
+  COUNT(DISTINCT source) AS source_count
+FROM all_phones
+GROUP BY phone_hash_original;
+```
+
+**Même pattern pour:**
+- ✅ `pii_first_name_reference`
+- ✅ `pii_last_name_reference`
+- ✅ `pii_address_reference`
+- ✅ `pii_ip_reference`
+
+#### 7. Master Reference (Combine Tout)
+
+```sql
+CREATE OR REPLACE TABLE `hulken.ads_data.pii_master_reference` AS
+
+SELECT 'email' AS pii_field, email_hash_original AS original_value,
+       email_hash_consistent AS consistent_hash, sources, source_count
+FROM `hulken.ads_data.pii_email_reference`
+
+UNION ALL
+
+SELECT 'phone' AS pii_field, phone_hash_original AS original_value,
+       phone_hash_consistent AS consistent_hash, sources, source_count
+FROM `hulken.ads_data.pii_phone_reference`
+
+-- ... (first_name, last_name, address, ip)
 ```
 
 **Résultat:**
-- Table contient SEULEMENT les emails non-NULL
-- NULL n'apparaît jamais dans `pii_hash_reference`
+- Toutes les tables contiennent SEULEMENT les valeurs non-NULL
+- NULL n'apparaît jamais dans aucune table de référence PII
+- Table master permet de query toutes les PII en un seul endroit
 
 ---
 
