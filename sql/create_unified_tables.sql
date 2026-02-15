@@ -71,7 +71,7 @@ WITH orders_base AS (
     CAST(total_line_items_price AS FLOAT64) AS order_subtotal,
     CAST(current_total_discounts AS FLOAT64) AS order_discounts,
     CAST(total_tax AS FLOAT64) AS order_tax,
-    CAST(total_shipping_price_set AS STRING) AS shipping_info,
+    TO_JSON_STRING(total_shipping_price_set) AS shipping_info,
 
     -- Line items count (will be enhanced with items table)
     0 AS items_count_placeholder,
@@ -123,12 +123,12 @@ items_aggregated AS (
 
     -- Aggregated metrics
     COUNT(*) AS items_count,
-    SUM(CAST(quantity AS INT64)) AS total_quantity,
+    SUM(quantity) AS total_quantity,
     STRING_AGG(DISTINCT sku, ', ') AS skus,
     STRING_AGG(DISTINCT title, ', ') AS product_titles,
-    SUM(CAST(JSON_EXTRACT_SCALAR(originalTotal, '$.amount') AS FLOAT64)) AS items_total_original,
+    SUM(originalTotal) AS items_total_original,
 
-  FROM `hulken.ads_data.shopify_live_items`
+  FROM `hulken.ads_data.shopify_line_items`
   WHERE order_id IS NOT NULL
   GROUP BY order_id_numeric
 ),
@@ -189,8 +189,16 @@ refunds_aggregated AS (
     order_id AS order_id_numeric,
 
     COUNT(*) AS refund_count,
-    SUM(CAST(JSON_EXTRACT_SCALAR(note, r'\$([0-9.]+)') AS FLOAT64)) AS refunds_total_amount,
-    MAX(created_at) AS last_refund_at,
+    -- Extract refund amount from transactions array
+    SUM(
+      CAST(
+        JSON_EXTRACT_SCALAR(
+          JSON_EXTRACT_ARRAY(transactions)[SAFE_OFFSET(0)],
+          '$.amount'
+        ) AS FLOAT64
+      )
+    ) AS refunds_total_amount,
+    MAX(created_at) AS last_refund_at
 
   FROM `hulken.ads_data.shopify_live_order_refunds`
   WHERE order_id IS NOT NULL
@@ -369,11 +377,6 @@ SELECT
   adgroup_id AS tt_adgroup_id,
   ad_id AS tt_ad_id,
 
-  -- ========== GROUPBY FEATURES ==========
-  campaign_name AS tt_campaign_name,
-  adgroup_name AS tt_adgroup_name,
-  ad_name AS tt_ad_name,
-
   -- ========== TARGETS (Metrics) ==========
   spend AS tt_spend,
   impressions AS tt_impressions,
@@ -385,10 +388,7 @@ SELECT
   SAFE_DIVIDE(spend, clicks) AS tt_cpc,
   SAFE_DIVIDE(spend, impressions) * 1000 AS tt_cpm,
   SAFE_DIVIDE(conversions, clicks) * 100 AS tt_conversion_rate,
-  SAFE_DIVIDE(spend, NULLIF(conversions, 0)) AS tt_cpa,
-
-  -- ========== METADATA ==========
-  _airbyte_extracted_at AS tt_last_sync_at
+  SAFE_DIVIDE(spend, NULLIF(conversions, 0)) AS tt_cpa
 
 FROM `hulken.ads_data.tiktok_ads_reports_daily`
 WHERE report_date IS NOT NULL;
@@ -490,9 +490,9 @@ FROM `hulken.ads_data.marketing_unified`;
 -- FINAL SUMMARY
 -- ============================================================
 SELECT
-  table_name,
+  table_id AS table_name,
   row_count,
   ROUND(size_bytes / 1024 / 1024, 2) AS size_mb
 FROM `hulken.ads_data.__TABLES__`
-WHERE table_name IN ('shopify_unified', 'facebook_unified', 'tiktok_unified', 'marketing_unified')
-ORDER BY table_name;
+WHERE table_id IN ('shopify_unified', 'facebook_unified', 'tiktok_unified', 'marketing_unified')
+ORDER BY table_id;
