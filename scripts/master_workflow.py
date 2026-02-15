@@ -92,7 +92,7 @@ def step1_test_bigquery_connection():
     """Test BigQuery connection"""
     print_step(1, "Test Connexion BigQuery", "🔌")
 
-    cmd = f"bq ls --project_id={BQ_PROJECT} {BQ_DATASET} --max_results=5"
+    cmd = f"bq ls --project_id={BQ_PROJECT} --max_results=5 {BQ_DATASET}"
     success, output = run_command(cmd, "Test connexion BigQuery")
 
     if success:
